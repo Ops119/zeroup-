@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zeroup Wallet</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #14161a; --muted: #5d6470; --line: #e3e6eb;
+    --accent: #3b5bdb; --accent-ink: #ffffff; --ok: #2b8a3e; --bad: #c92a2a; --chip: #eef1f6;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1115; --panel: #171a20; --text: #e8eaee; --muted: #9aa1ad; --line: #2a2f38;
+      --accent: #7c95ff; --accent-ink: #0f1115; --ok: #69db7c; --bad: #ff8787; --chip: #222731;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 12px; }
+  main { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; display: grid; gap: 16px; grid-template-columns: repeat(12, 1fr); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px; min-width: 0; }
+  .span-4 { grid-column: span 4; } .span-6 { grid-column: span 6; } .span-8 { grid-column: span 8; } .span-12 { grid-column: span 12; }
+  @media (max-width: 900px) { .span-4, .span-6, .span-8 { grid-column: span 12; } }
+  .balance { font-size: 36px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .mono { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+  .chip { display: inline-block; background: var(--chip); border-radius: 999px; padding: 2px 10px; font-size: 12px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  input { flex: 1; min-width: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+  button { padding: 9px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: progress; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; }
+  .table-wrap { overflow-x: auto; }
+  .table-wrap td { white-space: nowrap; }
+  .table-wrap td.mono { word-break: normal; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto; max-height: 220px; font-family: var(--mono); font-size: 12px; margin: 10px 0 0; }
+  .stack > * + * { margin-top: 10px; }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-size: 13px; display: none; max-width: calc(100% - 32px); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Zeroup Wallet</h1>
+    <div class="muted">Private x402 payments from a shielded balance · gas sponsored</div>
+  </div>
+  <div class="row">
+    <span class="chip" id="network">…</span>
+    <button class="ghost" id="refresh">Refresh</button>
+  </div>
+</header>
+
+<main>
+  <section class="card span-4 stack">
+    <h2>Shielded balance</h2>
+    <div class="balance" id="balance">–</div>
+    <div class="muted" id="notes"></div>
+    <div class="muted">Policy: <span id="policy"></span></div>
+  </section>
+
+  <section class="card span-4 stack">
+    <h2>Deposit (gasless)</h2>
+    <div class="muted">From public wallet <span class="mono" id="funder">–</span></div>
+    <div class="muted">Public balance: <span id="funderBal">–</span></div>
+    <div class="row"><input id="depAmount" value="5" inputmode="decimal" aria-label="Deposit amount"><button id="deposit">Deposit</button></div>
+  </section>
+
+  <section class="card span-4 stack">
+    <h2>Exit to a public address</h2>
+    <input id="exitTo" placeholder="0x… recipient" aria-label="Exit recipient">
+    <div class="row"><input id="exitAmount" value="1" inputmode="decimal" aria-label="Exit amount"><button id="exit" class="ghost">Withdraw</button></div>
+  </section>
+
+  <section class="card span-8 stack">
+    <h2>Agent: call a paid API</h2>
+    <div class="row" id="presets"></div>
+    <div class="row"><input id="url" placeholder="https://… x402 endpoint" aria-label="URL"><button id="go">Pay &amp; fetch</button></div>
+    <pre id="result">Responses appear here.</pre>
+  </section>
+
+  <section class="card span-4 stack">
+    <h2>What the merchant saw</h2>
+    <div class="muted">Each payment comes from a fresh account with no history and no link to your deposit wallet.</div>
+    <div class="table-wrap"><table><thead><tr><th>Payer</th><th>Amount</th></tr></thead><tbody id="ledger"></tbody></table></div>
+  </section>
+
+  <section class="card span-12 stack">
+    <h2>Payments</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Time</th><th>Resource</th><th>Amount</th><th>Fee</th><th>One-time payer</th><th>Status</th></tr></thead>
+        <tbody id="payments"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card span-12 stack">
+    <h2>Compliance &amp; audit</h2>
+    <div class="muted">Share your viewing key with an accountant or auditor: they can read your full history and balance but cannot move funds.</div>
+    <div class="row"><button class="ghost" id="showVk">Reveal viewing key</button><span class="mono" id="vk"></span></div>
+    <div class="row"><input id="auditVk" placeholder="Paste a viewing key (0x…)" aria-label="Viewing key"><button id="audit" class="ghost">Run audit</button></div>
+    <div class="table-wrap"><table><thead><tr><th>Kind</th><th>Amount</th><th>Detail</th></tr></thead><tbody id="auditRows"></tbody></table></div>
+    <div class="muted" id="auditTotals"></div>
+    <div class="muted">Stealth meta-address (ERC-5564) for receiving: <span class="mono" id="meta"></span></div>
+  </section>
+</main>
+<div id="toast" role="status"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let decimals = 6;
+const fmt = (v) => {
+  const b = BigInt(v), base = 10n ** BigInt(decimals);
+  const frac = (b % base).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return `${b / base}${frac ? "." + frac : ""}`;
+};
+const short = (a) => a ? `${a.slice(0, 8)}…${a.slice(-6)}` : "";
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 4000); }
+
+async function api(path, body) {
+  const res = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || res.statusText);
+  return json;
+}
+async function busy(btn, fn) {
+  btn.disabled = true;
+  try { await fn(); } catch (e) { toast(e.message); } finally { btn.disabled = false; }
+}
+
+let merchantUrl = null;
+async function refresh() {
+  const s = await api("/api/status");
+  decimals = s.decimals;
+  $("network").textContent = s.network;
+  $("balance").textContent = `${fmt(s.balance)} USDC`;
+  const unspent = s.notes.filter((n) => !n.spent);
+  $("notes").textContent = `${unspent.length} unspent note${unspent.length === 1 ? "" : "s"} in pool ${short(s.pool)}`;
+  $("policy").textContent = `≤ ${fmt(s.policy.maxPerPayment)} per payment, ${fmt(s.policy.dailyBudget)} per day`;
+  $("funder").textContent = s.funder ? short(s.funder.address) : "not configured";
+  $("funderBal").textContent = s.funder?.balance ? `${fmt(s.funder.balance)} USDC` : "–";
+  $("meta").textContent = s.stealthMetaAddress;
+  $("payments").innerHTML = s.payments.length ? s.payments.map((p) => `<tr>
+      <td>${new Date(p.ts).toLocaleTimeString()}</td><td class="mono">${esc(p.resource)}</td>
+      <td>${fmt(p.amount)}</td><td>${fmt(p.fee)}</td><td class="mono">${esc(short(p.payer))}</td>
+      <td class="${p.status === "paid" ? "ok" : p.status === "failed" ? "bad" : ""}">${esc(p.status)}${p.error ? ": " + esc(p.error) : ""}</td></tr>`).join("")
+    : `<tr><td colspan="6" class="muted">No payments yet.</td></tr>`;
+  if (s.merchantUrl && !merchantUrl) {
+    merchantUrl = s.merchantUrl;
+    const presets = [["Weather · $0.01", "/api/weather?city=Lisbon"], ["ETH quote · $0.02", "/api/quote/ETH"], ["Report · $0.05", "/api/report"]];
+    $("presets").innerHTML = presets.map(([l, p]) => `<button class="ghost" data-url="${esc(merchantUrl + p)}">${esc(l)}</button>`).join("");
+    $("url").value = merchantUrl + presets[0][1];
+  }
+  const ledger = await api("/api/merchant-ledger");
+  $("ledger").innerHTML = ledger.length ? ledger.slice().reverse().map((e) => `<tr><td class="mono">${esc(short(e.payer))}</td><td>${fmt(e.amount)}</td></tr>`).join("")
+    : `<tr><td colspan="2" class="muted">Nothing yet.</td></tr>`;
+}
+
+async function pay(url, btn) {
+  await busy(btn, async () => {
+    $("result").textContent = `Paying ${url} …`;
+    const r = await api("/api/fetch", { url });
+    const p = r.payment?.record;
+    $("result").textContent = `HTTP ${r.status}` + (p ? ` · paid ${fmt(p.amount)} USDC from one-time account ${p.payer}\n` : "\n") + JSON.stringify(r.body, null, 2);
+    await refresh();
+  });
+}
+
+$("presets").addEventListener("click", (e) => { const u = e.target.dataset?.url; if (u) { $("url").value = u; pay(u, e.target); } });
+$("go").onclick = (e) => pay($("url").value.trim(), e.currentTarget);
+$("refresh").onclick = (e) => busy(e.currentTarget, refresh);
+$("deposit").onclick = (e) => busy(e.currentTarget, async () => { await api("/api/deposit", { amount: $("depAmount").value }); toast("Deposited into the shielded pool"); await refresh(); });
+$("exit").onclick = (e) => busy(e.currentTarget, async () => { await api("/api/exit", { to: $("exitTo").value.trim(), amount: $("exitAmount").value }); toast("Withdrawn"); await refresh(); });
+$("showVk").onclick = (e) => busy(e.currentTarget, async () => { const { viewingKey } = await api("/api/viewing-key"); $("vk").textContent = viewingKey; $("auditVk").value = viewingKey; });
+$("audit").onclick = (e) => busy(e.currentTarget, async () => {
+  const r = await api("/api/audit", { viewingKey: $("auditVk").value.trim() });
+  $("auditRows").innerHTML = r.entries.map((x) => `<tr><td>${esc(x.kind)}</td><td>${fmt(x.amount)}</td><td class="mono">${esc(
+    x.kind === "deposit" ? "from " + x.depositor : x.kind === "payment" ? `${x.resource} → ${x.payTo}` : "to " + x.to)}</td></tr>`).join("")
+    || `<tr><td colspan="3" class="muted">No activity for this key.</td></tr>`;
+  const t = r.totals;
+  $("auditTotals").textContent = `Deposited ${fmt(t.deposited)} · paid ${fmt(t.paid)} · fees ${fmt(t.fees)} · exited ${fmt(t.withdrawn)} · balance ${fmt(t.shieldedBalance)} USDC`;
+});
+
+refresh().catch((e) => toast(e.message));
+</script>
+</body>
+</html>
