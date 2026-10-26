@@ -28,7 +28,10 @@ export interface PaymentRecord {
   payerIndex: number;
   withdrawTxs: string[];
   settleTx?: string;
-  status: "funded" | "paid" | "failed";
+  /** Unix seconds after which the signed EIP-3009 authorization can no longer settle. */
+  authValidBefore?: number;
+  /** funded: payer funded, awaiting settlement; reclaimed: unsettled funds moved back into the pool. */
+  status: "funded" | "paid" | "failed" | "reclaimed";
   error?: string;
 }
 
@@ -69,11 +72,21 @@ export class StateStore {
     this.key = hkdf(sha256, viewingKey, new TextEncoder().encode("zeroup"), new TextEncoder().encode("zeroup/v1/state"), 32);
   }
 
+  /**
+   * Returns null when there is no usable state. A corrupt or foreign file is
+   * moved aside rather than fatal: state is a cache that the wallet rebuilds
+   * from the chain and its seed.
+   */
   load(): WalletState | null {
     if (!fs.existsSync(this.file)) return null;
-    const raw = fs.readFileSync(this.file);
-    const pt = xchacha20poly1305(this.key, raw.subarray(0, 24)).decrypt(raw.subarray(24));
-    return JSON.parse(new TextDecoder().decode(pt)) as WalletState;
+    try {
+      const raw = fs.readFileSync(this.file);
+      const pt = xchacha20poly1305(this.key, raw.subarray(0, 24)).decrypt(raw.subarray(24));
+      return JSON.parse(new TextDecoder().decode(pt)) as WalletState;
+    } catch {
+      fs.renameSync(this.file, `${this.file}.corrupt-${Date.now()}`);
+      return null;
+    }
   }
 
   save(state: WalletState): void {

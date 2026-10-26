@@ -12,6 +12,13 @@ export function httpError(status: number, message: string): HttpError {
   return new HttpError(status, message);
 }
 
+/** HTTP status for an error: our own HttpErrors keep theirs, contract reverts are 422. */
+export function statusFor(err: unknown): number {
+  if (err instanceof HttpError) return err.status;
+  if (err instanceof BaseError && err.walk((e) => e instanceof ContractFunctionRevertedError)) return 422;
+  return 500;
+}
+
 /** Pulls the revert reason out of viem errors so clients see something useful. */
 export function errorMessage(err: unknown): string {
   if (err instanceof BaseError) {
@@ -41,6 +48,11 @@ export class RateLimiter {
     h.count++;
     return true;
   }
+}
+
+/** fetch with a deadline, so a hung peer cannot hang the caller forever. */
+export function fetchWithTimeout(url: string, init: RequestInit = {}, ms = 60_000): Promise<Response> {
+  return fetch(url, { ...init, signal: init.signal ?? AbortSignal.timeout(ms) });
 }
 
 export function listen(app: Express, port: number, host = "127.0.0.1"): Promise<Server> {

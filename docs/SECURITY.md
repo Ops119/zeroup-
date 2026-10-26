@@ -27,8 +27,15 @@ Privacy here means **unlinkability, not invisibility**. It is weakened by:
 5. **Operations.** Fund the sponsor and facilitator hot wallets from a treasury with low balances and alerting. Put them behind TLS and a WAF, and run several RPC providers.
 6. **Key UX.** Move to passkey-protected seeds with guardian recovery. The current keystore uses scrypt (N=2^15) with XChaCha20-Poly1305.
 
+## Service hardening already in place
+
+- **Wallet daemon:** rejects unknown `Host` headers (DNS rebinding) and non-JSON POSTs (cross-site forms). It refuses to bind beyond localhost without `WALLET_API_TOKEN`.
+- **Facilitator:** `FACILITATOR_API_KEY` restricts `/verify` and `/settle` to your merchants. Without it, anyone can use it as a free gas station for USDC transfers.
+- **Sponsor:** enforces a minimum deposit, per-address and per-IP rate limits, and an in-flight guard per nullifier.
+- **Signatures:** the sponsor and facilitator accept 65-byte and compact (EIP-2098) signatures.
+
 ## Known limitations
 
 - The sponsor pays deposit gas without being reimbursed; it is rate-limited per address.
-- If a multi-note payment fails partway, some funds stay in that payment's one-time account. They are recoverable, because the key comes from the seed, but there is no automatic sweep yet.
+- If a payment is funded but never settles (merchant down, payment rejected, partial multi-note failure), the money sits in that payment's one-time account. `zeroup reclaim` (or the dashboard's "Reclaim unsettled" button) moves it back into the pool once the signed authorization has expired. Amounts below the sponsor's minimum deposit stay put.
 - Wallet sync scans `eth_getLogs` from the deployment block. Large deployments need an indexer. A wrong leaf set from an indexer cannot cause a loss: the pool rejects any root it never had.

@@ -16,6 +16,8 @@ export interface AuditEntry {
   payTo?: Hex;
   to?: Hex;
   resource?: string;
+  /** Payment never settled; its funds came back to the pool (see the matching deposit). */
+  reclaimed?: boolean;
 }
 
 export interface AuditReport {
@@ -65,11 +67,22 @@ export async function auditWithViewingKey(
     }
   }
 
+  // A deposit made *from* one of our one-time payers is a reclaim of an
+  // unsettled payment, not new money or a completed payment.
+  const payers = new Set(entries.filter((e) => e.kind === "payment").map((e) => e.payer?.toLowerCase()));
+  const reclaimers = new Set(
+    entries.filter((e) => e.kind === "deposit" && payers.has(e.depositor?.toLowerCase())).map((e) => e.depositor!.toLowerCase()),
+  );
+  for (const e of entries) {
+    if (e.kind === "payment" && reclaimers.has(e.payer!.toLowerCase())) e.reclaimed = true;
+    if (e.kind === "deposit" && reclaimers.has(e.depositor!.toLowerCase())) e.reclaimed = true;
+  }
+
   const sum = (k: AuditEntry["kind"], f: (e: AuditEntry) => string | undefined) =>
-    entries.filter((e) => e.kind === k).reduce((s, e) => s + BigInt(f(e) ?? "0"), 0n);
+    entries.filter((e) => e.kind === k && !e.reclaimed).reduce((s, e) => s + BigInt(f(e) ?? "0"), 0n);
   // A payment split across notes appears once per note; count its amount once.
   const payments = new Map<string, AuditEntry>();
-  for (const e of entries) if (e.kind === "payment") payments.set(`${e.payer}`, e);
+  for (const e of entries) if (e.kind === "payment" && !e.reclaimed) payments.set(`${e.payer}`, e);
   const paid = [...payments.values()].reduce((s, e) => s + BigInt(e.amount), 0n);
   const fees = entries.filter((e) => e.kind !== "deposit").reduce((s, e) => s + BigInt(e.fee ?? "0"), 0n);
   const balance = [...noteValues.entries()].filter(([i]) => !spentNotes.has(i)).reduce((s, [, v]) => s + v, 0n);

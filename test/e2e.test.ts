@@ -1,6 +1,7 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "fs";
+import http from "http";
 import os from "os";
 import path from "path";
 import { getAddress, type Hex, type PublicClient } from "viem";
@@ -20,6 +21,12 @@ import { auditWithViewingKey } from "../src/wallet/auditor";
 import { PolicyError } from "../src/wallet/policy";
 import { ZeroupWallet, withdrawContext, TREE_LEVELS } from "../src/wallet/wallet";
 import { createPrivateFetch } from "../src/wallet/x402-fetch";
+import { createWalletServer } from "../src/services/wallet-server";
+import { createFacilitatorApp } from "../src/services/facilitator";
+import { listen } from "../src/services/http";
+import { depositNonce } from "../src/wallet/wallet";
+import { RECEIVE_WITH_AUTHORIZATION_TYPES, tokenDomain } from "../src/core/eip3009";
+import { parseSignature, serializeCompactSignature, signatureToCompactSignature } from "viem";
 
 const RPC = "http://127.0.0.1:8746";
 const PORTS = { sponsor: 5710, facilitator: 5720, merchant: 5730, wallet: 5740 };
@@ -162,8 +169,8 @@ describe("zeroup end-to-end", () => {
     assert.equal(restored.balance(), w.balance());
     assert.equal(restored.payments().length, 1);
     // New activity after recovery must not reuse indices.
-    await restored.deposit(funder, 1_000n);
-    assert.equal(restored.balance(), w.balance() + 1_000n);
+    await restored.deposit(funder, 10_000n);
+    assert.equal(restored.balance(), w.balance() + 10_000n);
   });
 
   test("payment that spans several notes", async () => {
@@ -259,5 +266,104 @@ describe("zeroup end-to-end", () => {
     assert.equal(replay.status, 402);
     const reason = decodeHeader<{ error: string }>(replay.headers.get("PAYMENT-REQUIRED")!).error;
     assert.match(reason, /nonce_used|insufficient_funds/);
+  });
+
+  test("unsettled payments are reclaimed into the pool after their authorization expires", async () => {
+    const w = await openWallet(keysFromMnemonic(newMnemonic()), "reclaim");
+    await w.deposit(funder, 1_000_000n);
+    const first = await fetch(`${svc.merchantUrl}/api/report`);
+    const required = decodeHeader<{ accepts: PaymentPayload["accepted"][]; resource: { url: string } }>(first.headers.get("PAYMENT-REQUIRED")!);
+    // Fund a payer and sign, but never send the payment (merchant unreachable, crash...).
+    const { record } = await w.pay({ ...required.accepts[0], maxTimeoutSeconds: 1 }, required.resource);
+    const fee = BigInt(cfg.sponsorWithdrawFee);
+    assert.equal(w.balance(), 1_000_000n - 50_000n - fee);
+    assert.deepEqual(await w.reclaim(), [], "not reclaimed while the authorization is still valid");
+    const out = await w.reclaim({ now: Date.now() + 5_000 });
+    assert.equal(out.length, 1);
+    assert.equal(getAddress(out[0].payer), getAddress(record.payer));
+    assert.equal(w.balance(), 1_000_000n - fee);
+    assert.equal(w.payments()[0].status, "reclaimed");
+    const report = await auditWithViewingKey(keysFromMnemonic(newMnemonic()).viewingKey, client, d);
+    assert.equal(report.entries.length, 0, "other keys see nothing");
+  });
+
+  test("sponsor accepts compact (EIP-2098) signatures and rejects dust deposits", async () => {
+    await initPoseidon();
+    const keys = keysFromMnemonic(newMnemonic());
+    const s = noteSecrets(keys, 0);
+    const memo = encryptMemo(keys.viewingKey, { v: 1, kind: "deposit", noteIndex: 0, value: "20000", ts: 0 });
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    const message = { from: funder.address, to: d.pool, value: 20_000n, validAfter: now - 60n, validBefore: now + 600n, nonce: depositNonce(d.chainId, d.pool, s.precommitment, memo) };
+    const sig = await funder.signTypedData({
+      domain: tokenDomain(d.tokenName, d.tokenVersion, d.chainId, d.token),
+      types: RECEIVE_WITH_AUTHORIZATION_TYPES,
+      primaryType: "ReceiveWithAuthorization",
+      message,
+    });
+    const compact = serializeCompactSignature(signatureToCompactSignature(parseSignature(sig)));
+    const ok = await post(`${svc.sponsorUrl}/v1/deposit`, { ...message, signature: compact, precommitment: s.precommitment, encryptedNote: memo });
+    assert.equal(ok.status, 200, JSON.stringify(ok.body));
+    const dust = await post(`${svc.sponsorUrl}/v1/deposit`, { ...message, value: 1n, signature: compact, precommitment: s.precommitment, encryptedNote: memo });
+    assert.equal(dust.status, 400);
+    assert.match(dust.body.error!, /minimum/);
+    const badJson = await fetch(`${svc.sponsorUrl}/v1/deposit`, { method: "POST", headers: { "content-type": "application/json" }, body: "{" });
+    assert.equal(badJson.status, 400);
+  });
+
+  test("merchant answers malformed payments with 402, not a crash", async () => {
+    const bogus = { x402Version: 2, accepted: { scheme: "exact", network: "eip155:31337", amount: "50000", asset: "zzz", payTo: "0x1" }, payload: {} };
+    const res = await fetch(`${svc.merchantUrl}/api/report`, { headers: { [HEADER_PAYMENT_SIGNATURE]: encodeHeader(bogus) } });
+    assert.equal(res.status, 402);
+    const garbage = await fetch(`${svc.merchantUrl}/api/report`, { headers: { [HEADER_PAYMENT_SIGNATURE]: "!!!" } });
+    assert.equal(garbage.status, 400);
+  });
+
+  test("facilitator with an API key refuses unauthenticated callers", async () => {
+    const app = createFacilitatorApp({ deployment: d, publicClient: client, wallet: makeWalletClient(RPC, 31337, DEV_KEYS.facilitator), apiKey: "s3cret" });
+    const server = await listen(app, 5799);
+    try {
+      const anon = await fetch("http://127.0.0.1:5799/settle", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      assert.equal(anon.status, 401);
+      const authed = await fetch("http://127.0.0.1:5799/verify", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer s3cret" }, body: "{}" });
+      assert.equal(((await authed.json()) as { isValid: boolean }).isValid, false);
+      assert.equal((await fetch("http://127.0.0.1:5799/supported")).status, 200);
+    } finally {
+      server.close();
+    }
+  });
+
+  test("wallet daemon blocks DNS-rebinding hosts and non-JSON posts", async () => {
+    const keys = keysFromMnemonic(newMnemonic());
+    const w = await openWallet(keys, "daemon");
+    const server = await listen(createWalletServer({ wallet: w, keys, publicClient: client }), 5798);
+    try {
+      // fetch() ignores custom Host headers, so use node:http like a rebinding browser would arrive.
+      const status = (host: string) =>
+        new Promise<number>((resolve, reject) =>
+          http.get({ host: "127.0.0.1", port: 5798, path: "/api/viewing-key", headers: { host } }, (r) => {
+            r.resume();
+            resolve(r.statusCode!);
+          }).on("error", reject),
+        );
+      assert.equal(await status("evil.example:5798"), 403);
+      assert.equal(await status("localhost:5798"), 200);
+      const ok = await fetch("http://127.0.0.1:5798/api/viewing-key");
+      assert.equal(ok.status, 200);
+      const form = await fetch("http://127.0.0.1:5798/api/exit", { method: "POST", headers: { "content-type": "text/plain" }, body: "{}" });
+      assert.equal(form.status, 415);
+    } finally {
+      server.close();
+    }
+  });
+
+  test("a corrupt state file is set aside and rebuilt from the chain", async () => {
+    const mnemonic = newMnemonic();
+    const w = await openWallet(keysFromMnemonic(mnemonic), "corrupt");
+    await w.deposit(funder, 30_000n);
+    fs.writeFileSync(path.join(tmp, "corrupt.bin"), "garbage");
+    const again = await openWallet(keysFromMnemonic(mnemonic), "corrupt");
+    await again.sync();
+    assert.equal(again.balance(), 30_000n);
+    assert.ok(fs.readdirSync(tmp).some((f) => f.startsWith("corrupt.bin.corrupt-")));
   });
 });

@@ -1,9 +1,9 @@
 import express, { type Request, type Response } from "express";
-import { getAddress, parseSignature, verifyTypedData, type Hex, type PublicClient } from "viem";
+import { getAddress, verifyTypedData, type Hex, type PublicClient } from "viem";
 import { MockUSDC, Screener } from "../generated/contracts";
 import type { Deployment } from "../core/deployment";
 import { SerialQueue, type Wallet } from "../core/chain";
-import { TRANSFER_WITH_AUTHORIZATION_TYPES, tokenDomain } from "../core/eip3009";
+import { TRANSFER_WITH_AUTHORIZATION_TYPES, splitSignature, tokenDomain } from "../core/eip3009";
 import {
   X402_VERSION,
   caip2,
@@ -22,6 +22,11 @@ export interface FacilitatorOptions {
   wallet: Wallet;
   /** Seconds of clock skew tolerated on validAfter/validBefore. */
   clockSkew?: number;
+  /**
+   * If set, /verify and /settle require "Authorization: Bearer <key>". Without
+   * it anyone can use this facilitator as a free gas station for transfers.
+   */
+  apiKey?: string;
   log?: (msg: string) => void;
 }
 
@@ -52,6 +57,9 @@ export function createFacilitatorApp(opts: FacilitatorOptions) {
   app.use(express.json({ limit: "64kb" }));
   app.use((req, _res, next) => {
     if (!ipLimiter.take(req.ip ?? "unknown")) return next(httpError(429, "rate limited"));
+    if (opts.apiKey && req.method === "POST" && req.get("authorization") !== `Bearer ${opts.apiKey}`) {
+      return next(httpError(401, "unauthorized"));
+    }
     next();
   });
 
@@ -63,29 +71,40 @@ export function createFacilitatorApp(opts: FacilitatorOptions) {
     const signature = payload.payload?.signature;
     if (!auth || !signature) throw new InvalidPayment("invalid_payload");
 
-    let from: Hex, to: Hex, asset: Hex, payTo: Hex;
+    let from: Hex, to: Hex, asset: Hex, payTo: Hex, acceptedAsset: Hex, acceptedPayTo: Hex;
     try {
       from = getAddress(auth.from);
       to = getAddress(auth.to);
       asset = getAddress(requirements.asset);
       payTo = getAddress(requirements.payTo);
+      acceptedAsset = getAddress(payload.accepted.asset);
+      acceptedPayTo = getAddress(payload.accepted.payTo);
     } catch {
       throw new InvalidPayment("invalid_payload");
     }
-    if (asset !== getAddress(d.token) || getAddress(payload.accepted.asset) !== asset) throw new InvalidPayment("invalid_asset");
-    if (to !== payTo || getAddress(payload.accepted.payTo) !== payTo) {
+    if (asset !== getAddress(d.token) || acceptedAsset !== asset) throw new InvalidPayment("invalid_asset");
+    if (to !== payTo || acceptedPayTo !== payTo) {
       throw new InvalidPayment("invalid_exact_evm_payload_recipient_mismatch", from);
     }
-    const value = BigInt(auth.value);
-    if (value !== BigInt(requirements.amount) || payload.accepted.amount !== requirements.amount) {
+    let value: bigint, required: bigint, validAfter: bigint, validBefore: bigint, maxTimeout: bigint;
+    try {
+      value = BigInt(auth.value);
+      required = BigInt(requirements.amount);
+      validAfter = BigInt(auth.validAfter);
+      validBefore = BigInt(auth.validBefore);
+      maxTimeout = BigInt(requirements.maxTimeoutSeconds);
+      if (!/^0x[0-9a-fA-F]{64}$/.test(auth.nonce) || !/^0x[0-9a-fA-F]+$/.test(signature)) throw new Error();
+      splitSignature(signature);
+    } catch {
+      throw new InvalidPayment("invalid_payload", from);
+    }
+    if (value !== required || payload.accepted.amount !== requirements.amount) {
       throw new InvalidPayment("invalid_exact_evm_payload_authorization_value", from);
     }
     const now = BigInt(Math.floor(Date.now() / 1000));
-    const validAfter = BigInt(auth.validAfter);
-    const validBefore = BigInt(auth.validBefore);
     if (validAfter > now + skew) throw new InvalidPayment("invalid_exact_evm_payload_authorization_valid_after", from);
     if (validBefore < now + skew) throw new InvalidPayment("invalid_exact_evm_payload_authorization_valid_before", from);
-    if (validBefore - now > BigInt(requirements.maxTimeoutSeconds) + skew) {
+    if (validBefore - now > maxTimeout + skew) {
       throw new InvalidPayment("invalid_exact_evm_payload_authorization_valid_before", from);
     }
 
@@ -114,7 +133,7 @@ export function createFacilitatorApp(opts: FacilitatorOptions) {
 
   function transferArgs(payload: PaymentPayload) {
     const a = payload.payload.authorization;
-    const { v, r, s } = parseSignature(payload.payload.signature);
+    const { v, r, s } = splitSignature(payload.payload.signature);
     return [
       getAddress(a.from),
       getAddress(a.to),
@@ -122,7 +141,7 @@ export function createFacilitatorApp(opts: FacilitatorOptions) {
       BigInt(a.validAfter),
       BigInt(a.validBefore),
       a.nonce,
-      Number(v ?? 0n),
+      v,
       r,
       s,
     ] as const;

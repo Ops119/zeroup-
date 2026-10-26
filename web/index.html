@@ -103,7 +103,7 @@
   </section>
 
   <section class="card span-12 stack">
-    <h2>Payments</h2>
+    <div class="row" style="justify-content: space-between"><h2 style="margin: 0">Payments</h2><button class="ghost" id="reclaim" title="Return funds from payments that never settled">Reclaim unsettled</button></div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Time</th><th>Resource</th><th>Amount</th><th>Fee</th><th>One-time payer</th><th>Status</th></tr></thead>
@@ -190,10 +190,15 @@ $("go").onclick = (e) => pay($("url").value.trim(), e.currentTarget);
 $("refresh").onclick = (e) => busy(e.currentTarget, refresh);
 $("deposit").onclick = (e) => busy(e.currentTarget, async () => { await api("/api/deposit", { amount: $("depAmount").value }); toast("Deposited into the shielded pool"); await refresh(); });
 $("exit").onclick = (e) => busy(e.currentTarget, async () => { await api("/api/exit", { to: $("exitTo").value.trim(), amount: $("exitAmount").value }); toast("Withdrawn"); await refresh(); });
+$("reclaim").onclick = (e) => busy(e.currentTarget, async () => {
+  const r = await api("/api/reclaim", {});
+  toast(r.reclaimed.length ? `Returned ${r.reclaimed.length} unsettled payment(s) to the pool` : "Nothing to reclaim");
+  await refresh();
+});
 $("showVk").onclick = (e) => busy(e.currentTarget, async () => { const { viewingKey } = await api("/api/viewing-key"); $("vk").textContent = viewingKey; $("auditVk").value = viewingKey; });
 $("audit").onclick = (e) => busy(e.currentTarget, async () => {
   const r = await api("/api/audit", { viewingKey: $("auditVk").value.trim() });
-  $("auditRows").innerHTML = r.entries.map((x) => `<tr><td>${esc(x.kind)}</td><td>${fmt(x.amount)}</td><td class="mono">${esc(
+  $("auditRows").innerHTML = r.entries.map((x) => `<tr><td>${esc(x.kind)}${x.reclaimed ? " (reclaimed)" : ""}</td><td>${fmt(x.amount)}</td><td class="mono">${esc(
     x.kind === "deposit" ? "from " + x.depositor : x.kind === "payment" ? `${x.resource} → ${x.payTo}` : "to " + x.to)}</td></tr>`).join("")
     || `<tr><td colspan="3" class="muted">No activity for this key.</td></tr>`;
   const t = r.totals;

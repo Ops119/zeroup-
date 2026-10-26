@@ -14,6 +14,7 @@ import {
   type SettleResponse,
   type VerifyResponse,
 } from "../core/x402";
+import { errorMessage, fetchWithTimeout } from "./http";
 
 export interface PaywallConfig {
   facilitatorUrl: string;
@@ -23,6 +24,8 @@ export interface PaywallConfig {
   assetVersion: string;
   payTo: Hex;
   maxTimeoutSeconds?: number;
+  /** Sent as "Authorization: Bearer <key>" to a facilitator that requires it. */
+  facilitatorApiKey?: string;
   onSettled?: (info: { resource: string; amount: string; payer: string; transaction: string }) => void;
 }
 
@@ -33,10 +36,12 @@ export interface PaidRoute {
   handler: (req: Request) => Promise<unknown> | unknown;
 }
 
-async function facilitator<T>(url: string, path: string, payload: PaymentPayload, requirements: PaymentRequirements): Promise<T> {
-  const res = await fetch(`${url}${path}`, {
+async function facilitator<T>(cfg: PaywallConfig, path: string, payload: PaymentPayload, requirements: PaymentRequirements): Promise<T> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (cfg.facilitatorApiKey) headers.authorization = `Bearer ${cfg.facilitatorApiKey}`;
+  const res = await fetchWithTimeout(`${cfg.facilitatorUrl}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers,
     body: JSON.stringify({ x402Version: X402_VERSION, paymentPayload: payload, paymentRequirements: requirements }),
   });
   if (!res.ok) throw new Error(`facilitator ${path} returned ${res.status}`);
@@ -77,29 +82,36 @@ export function paid(cfg: PaywallConfig, route: PaidRoute): RequestHandler {
     } catch {
       return requirePayment("malformed PAYMENT-SIGNATURE header", 400);
     }
-    const a = payload.accepted;
-    if (
-      !a ||
-      a.scheme !== requirements.scheme ||
-      a.network !== requirements.network ||
-      a.amount !== requirements.amount ||
-      getAddress(a.asset) !== getAddress(requirements.asset) ||
-      getAddress(a.payTo) !== getAddress(requirements.payTo)
-    ) {
-      return requirePayment("payment does not match requirements");
-    }
+    if (!matches(payload, requirements)) return requirePayment("payment does not match requirements");
 
-    const verified = await facilitator<VerifyResponse>(cfg.facilitatorUrl, "/verify", payload, requirements);
+    const verified = await facilitator<VerifyResponse>(cfg, "/verify", payload, requirements);
     if (!verified.isValid) return requirePayment(verified.invalidReason ?? "invalid payment");
 
     const result = await route.handler(req);
 
-    const settled = await facilitator<SettleResponse>(cfg.facilitatorUrl, "/settle", payload, requirements);
+    const settled = await facilitator<SettleResponse>(cfg, "/settle", payload, requirements);
     res.set(HEADER_PAYMENT_RESPONSE, encodeHeader(settled));
     if (!settled.success) return res.status(402).json({});
     cfg.onSettled?.({ resource: resource.url, amount: route.price, payer: settled.payer ?? "", transaction: settled.transaction });
     res.json(result);
   };
+}
+
+function matches(payload: PaymentPayload, req: PaymentRequirements): boolean {
+  const a = payload?.accepted;
+  try {
+    return (
+      !!a &&
+      payload.x402Version === X402_VERSION &&
+      a.scheme === req.scheme &&
+      a.network === req.network &&
+      a.amount === req.amount &&
+      getAddress(a.asset) === getAddress(req.asset) &&
+      getAddress(a.payTo) === getAddress(req.payTo)
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** What the merchant observed: the only view a merchant ever has of payers. */
@@ -173,6 +185,10 @@ export function createMerchantApp(cfg: Omit<PaywallConfig, "onSettled">) {
 
   app.get("/merchant/ledger", (_req, res) => {
     res.json(ledger);
+  });
+
+  app.use((err: unknown, _req: Request, res: Response, _next: unknown) => {
+    res.status(502).json({ error: `payment processing failed: ${errorMessage(err)}` });
   });
 
   return { app, ledger };

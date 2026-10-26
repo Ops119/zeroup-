@@ -21,6 +21,8 @@ export interface WalletServerOptions {
   apiToken?: string;
   /** Demo merchant, for the "what the merchant saw" panel. */
   merchantUrl?: string;
+  /** Host headers accepted besides localhost/127.0.0.1/[::1] (e.g. a reverse-proxy name). */
+  allowedHosts?: string[];
   log?: (m: string) => void;
 }
 
@@ -31,10 +33,21 @@ export function createWalletServer(opts: WalletServerOptions) {
   const privateFetch = createPrivateFetch(wallet);
   const log = opts.log ?? (() => {});
   const app = express();
+  const allowedHosts = new Set(["localhost", "127.0.0.1", "[::1]", ...(opts.allowedHosts ?? [])]);
+
+  // DNS-rebinding guard: a web page that points its own domain at 127.0.0.1
+  // must not be able to read the viewing key or trigger payments.
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    const host = (req.get("host") ?? "").replace(/:\d+$/, "").toLowerCase();
+    if (!allowedHosts.has(host)) return next(httpError(403, "host not allowed"));
+    next();
+  });
   app.use(express.json({ limit: "32kb" }));
 
   app.use("/api", (req: Request, _res: Response, next: NextFunction) => {
     if (opts.apiToken && req.get("authorization") !== `Bearer ${opts.apiToken}`) return next(httpError(401, "unauthorized"));
+    // JSON-only POSTs force a CORS preflight, so cross-site forms cannot trigger actions.
+    if (req.method === "POST" && !req.is("application/json")) return next(httpError(415, "content-type must be application/json"));
     next();
   });
 
@@ -103,6 +116,11 @@ export function createWalletServer(opts: WalletServerOptions) {
       throw httpError(400, "invalid address");
     }
     res.json({ txs: await wallet.exit(to, amount(req.body?.amount)) });
+  });
+
+  app.post("/api/reclaim", async (_req, res) => {
+    const out = await wallet.reclaim();
+    res.json({ reclaimed: out.map((r) => ({ payer: r.payer, amount: r.amount.toString(), txHash: r.txHash })) });
   });
 
   app.get("/api/viewing-key", (_req, res) => {

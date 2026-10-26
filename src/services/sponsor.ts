@@ -1,11 +1,12 @@
 import express, { type Request, type Response } from "express";
-import { getAddress, parseEventLogs, parseSignature, type Hex, type PublicClient } from "viem";
+import { getAddress, parseEventLogs, type Hex, type PublicClient } from "viem";
 import { ZeroupPool, Screener } from "../generated/contracts";
 import type { Deployment } from "../core/deployment";
 import { SerialQueue, type Wallet } from "../core/chain";
 import { publicSignals, verifyWithdrawProof, type SolidityProof } from "../core/prover";
 import { caip2 } from "../core/x402";
-import { RateLimiter, errorMessage, httpError, HttpError } from "./http";
+import { splitSignature } from "../core/eip3009";
+import { RateLimiter, errorMessage, httpError, statusFor } from "./http";
 
 export interface SponsorOptions {
   deployment: Deployment;
@@ -15,13 +16,17 @@ export interface SponsorOptions {
   withdrawFee: bigint;
   /** Gasless deposits allowed per funding address per hour. */
   depositsPerHour?: number;
+  /** Smallest gasless deposit, so dust deposits cannot drain the sponsor's gas. */
+  minDeposit?: bigint;
   log?: (msg: string) => void;
 }
 
 const big = (v: unknown, name: string): bigint => {
   try {
     if (typeof v !== "string" && typeof v !== "number") throw new Error();
-    return BigInt(v);
+    const n = BigInt(v);
+    if (n < 0n || n >= 2n ** 256n) throw new Error();
+    return n;
   } catch {
     throw httpError(400, `invalid ${name}`);
   }
@@ -50,6 +55,8 @@ const hex = (v: unknown, name: string): Hex => {
 export function createSponsorApp(opts: SponsorOptions) {
   const { deployment: d, publicClient: client, wallet } = opts;
   const queue = new SerialQueue();
+  const minDeposit = opts.minDeposit ?? 10_000n;
+  const inFlightNullifiers = new Set<string>();
   const depositLimiter = new RateLimiter(opts.depositsPerHour ?? 20, 3_600_000);
   const ipLimiter = new RateLimiter(120, 60_000);
   const log = opts.log ?? (() => {});
@@ -76,6 +83,7 @@ export function createSponsorApp(opts: SponsorOptions) {
       pool: d.pool,
       token: d.token,
       withdrawFee: opts.withdrawFee.toString(),
+      minDeposit: minDeposit.toString(),
     });
   });
 
@@ -92,10 +100,16 @@ export function createSponsorApp(opts: SponsorOptions) {
     const encryptedNote = hex(b.encryptedNote, "encryptedNote");
     if (encryptedNote.length > 2 + 2 * 1024) throw httpError(400, "memo too large");
     if (await isBlocked(from)) throw httpError(403, "depositor is blocked by screening");
+    if (value < minDeposit) throw httpError(400, `deposit below minimum ${minDeposit}`);
+    let sig: ReturnType<typeof splitSignature>;
+    try {
+      sig = splitSignature(signature);
+    } catch {
+      throw httpError(400, "invalid signature");
+    }
     if (!depositLimiter.take(from)) throw httpError(429, "too many deposits from this address");
 
-    const { v, r, s } = parseSignature(signature);
-    const args = [from, value, validAfter, validBefore, nonce, Number(v ?? 0n), r, s, precommitment, encryptedNote] as const;
+    const args = [from, value, validAfter, validBefore, nonce, sig.v, sig.r, sig.s, precommitment, encryptedNote] as const;
     const receipt = await queue.run(async () => {
       const { request } = await client.simulateContract({
         account: wallet.account,
@@ -132,45 +146,51 @@ export function createSponsorApp(opts: SponsorOptions) {
     if (request.relayer !== wallet.account.address) throw httpError(400, "relayer must be this sponsor");
     if (request.fee < opts.withdrawFee) throw httpError(400, `fee below minimum ${opts.withdrawFee}`);
     if (await isBlocked(request.recipient)) throw httpError(403, "recipient is blocked by screening");
+    const nullifierKey = request.nullifierHash.toString();
+    if (inFlightNullifiers.has(nullifierKey)) throw httpError(409, "withdrawal for this note already in progress");
+    inFlightNullifiers.add(nullifierKey);
+    try {
+      const [spent, knownRoot, context] = await Promise.all([
+        client.readContract({ address: d.pool, abi: ZeroupPool.abi, functionName: "nullifierSpent", args: [request.nullifierHash] }),
+        client.readContract({ address: d.pool, abi: ZeroupPool.abi, functionName: "isKnownRoot", args: [request.root] }),
+        client.readContract({
+          address: d.pool,
+          abi: ZeroupPool.abi,
+          functionName: "withdrawContext",
+          args: [request.recipient, request.relayer, request.fee, request.encryptedNote],
+        }),
+      ]);
+      if (spent) throw httpError(409, "note already spent");
+      if (!knownRoot) throw httpError(409, "unknown merkle root; resync and retry");
+      const signals = publicSignals({ ...request, context });
+      if (!(await verifyWithdrawProof(p, signals))) throw httpError(400, "invalid proof");
 
-    const [spent, knownRoot, context] = await Promise.all([
-      client.readContract({ address: d.pool, abi: ZeroupPool.abi, functionName: "nullifierSpent", args: [request.nullifierHash] }),
-      client.readContract({ address: d.pool, abi: ZeroupPool.abi, functionName: "isKnownRoot", args: [request.root] }),
-      client.readContract({
-        address: d.pool,
-        abi: ZeroupPool.abi,
-        functionName: "withdrawContext",
-        args: [request.recipient, request.relayer, request.fee, request.encryptedNote],
-      }),
-    ]);
-    if (spent) throw httpError(409, "note already spent");
-    if (!knownRoot) throw httpError(409, "unknown merkle root; resync and retry");
-    const signals = publicSignals({ ...request, context });
-    if (!(await verifyWithdrawProof(p, signals))) throw httpError(400, "invalid proof");
-
-    const proof = {
-      a: [BigInt(p.a[0]), BigInt(p.a[1])] as const,
-      b: [
-        [BigInt(p.b[0][0]), BigInt(p.b[0][1])],
-        [BigInt(p.b[1][0]), BigInt(p.b[1][1])],
-      ] as const,
-      c: [BigInt(p.c[0]), BigInt(p.c[1])] as const,
-    };
-    const receipt = await queue.run(async () => {
-      const { request: tx } = await client.simulateContract({
-        account: wallet.account,
-        address: d.pool,
-        abi: ZeroupPool.abi,
-        functionName: "withdraw",
-        args: [proof, request],
+      const proof = {
+        a: [BigInt(p.a[0]), BigInt(p.a[1])] as const,
+        b: [
+          [BigInt(p.b[0][0]), BigInt(p.b[0][1])],
+          [BigInt(p.b[1][0]), BigInt(p.b[1][1])],
+        ] as const,
+        c: [BigInt(p.c[0]), BigInt(p.c[1])] as const,
+      };
+      const receipt = await queue.run(async () => {
+        const { request: tx } = await client.simulateContract({
+          account: wallet.account,
+          address: d.pool,
+          abi: ZeroupPool.abi,
+          functionName: "withdraw",
+          args: [proof, request],
+        });
+        const hash = await wallet.writeContract(tx);
+        return client.waitForTransactionReceipt({ hash });
       });
-      const hash = await wallet.writeContract(tx);
-      return client.waitForTransactionReceipt({ hash });
-    });
-    if (receipt.status !== "success") throw httpError(502, "withdrawal reverted");
-    const [ev] = parseEventLogs({ abi: ZeroupPool.abi, eventName: "Withdrawal", logs: receipt.logs });
-    log(`withdraw ${request.withdrawnValue} -> ${request.recipient} (fee ${request.fee}) ${receipt.transactionHash}`);
-    res.json({ txHash: receipt.transactionHash, leafIndex: Number(ev.args.leafIndex) });
+      if (receipt.status !== "success") throw httpError(502, "withdrawal reverted");
+      const [ev] = parseEventLogs({ abi: ZeroupPool.abi, eventName: "Withdrawal", logs: receipt.logs });
+      log(`withdraw ${request.withdrawnValue} -> ${request.recipient} (fee ${request.fee}) ${receipt.transactionHash}`);
+      res.json({ txHash: receipt.transactionHash, leafIndex: Number(ev.args.leafIndex) });
+    } finally {
+      inFlightNullifiers.delete(nullifierKey);
+    }
   });
 
   app.use(errorHandler(log));
@@ -179,7 +199,9 @@ export function createSponsorApp(opts: SponsorOptions) {
 
 export function errorHandler(log: (msg: string) => void) {
   return (err: unknown, _req: Request, res: Response, _next: unknown) => {
-    const status = err instanceof HttpError ? err.status : 500;
+    // Malformed JSON bodies surface as body-parser errors carrying a status.
+    const parserStatus = (err as { status?: number; type?: string })?.type === "entity.parse.failed" ? 400 : undefined;
+    const status = parserStatus ?? statusFor(err);
     const message = errorMessage(err);
     if (status >= 500) log(`error: ${message}`);
     res.status(status).json({ error: message });

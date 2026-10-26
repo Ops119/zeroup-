@@ -7,6 +7,7 @@
  *   zeroup pay <url> [--method POST] [--data JSON]
  *                                        call an x402 endpoint, paying privately
  *   zeroup exit <address> <amount>       withdraw to a public address
+ *   zeroup reclaim                       return unsettled payment funds to the pool
  *   zeroup viewing-key                   print the read-only viewing key
  *   zeroup audit <viewingKey>            history visible to a viewing key
  *   zeroup meta-address                  ERC-5564 stealth meta-address
@@ -57,9 +58,9 @@ async function main() {
       return;
     }
     case "deposit": {
-      const amount = parseUnits(requireArg(args[0], "amount"), 6);
       const funder = privateKeyToAccount(requireKey(cfg.keys.funder, "FUNDER_PRIVATE_KEY"));
       const w = await openWallet(cfg, { log: console.log });
+      const amount = parseUnits(requireArg(args[0], "amount"), w.deployment.tokenDecimals);
       const r = await w.deposit(funder, amount);
       console.log(`deposited ${usd(amount)} from ${funder.address} (tx ${r.txHash}); balance ${usd(w.balance())}`);
       return;
@@ -83,10 +84,17 @@ async function main() {
     }
     case "exit": {
       const to = getAddress(requireArg(args[0], "address"));
-      const amount = parseUnits(requireArg(args[1], "amount"), 6);
       const w = await openWallet(cfg, { log: console.log });
+      const amount = parseUnits(requireArg(args[1], "amount"), w.deployment.tokenDecimals);
       const txs = await w.exit(to, amount);
       console.log(`sent ${usd(amount)} to ${to} (${txs.join(", ")}); balance ${usd(w.balance())}`);
+      return;
+    }
+    case "reclaim": {
+      const w = await openWallet(cfg, { log: console.log });
+      const out = await w.reclaim();
+      for (const r of out) console.log(`returned ${usd(r.amount)} from ${r.payer} (tx ${r.txHash})`);
+      console.log(out.length ? `balance ${usd(w.balance())}` : "nothing to reclaim");
       return;
     }
     case "viewing-key": {

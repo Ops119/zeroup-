@@ -32,6 +32,9 @@ export interface Config {
   ports: { sponsor: number; facilitator: number; merchant: number; wallet: number };
   urls: { sponsor: string; facilitator: string; merchant: string };
   sponsorWithdrawFee: bigint;
+  sponsorMinDeposit: bigint;
+  /** Shared secret between merchants and the facilitator (optional). */
+  facilitatorApiKey?: string;
   logChunkSize: bigint;
 }
 
@@ -67,6 +70,8 @@ export function loadConfig(): Config {
       merchant: env("MERCHANT_URL") ?? `http://127.0.0.1:${ports.merchant}`,
     },
     sponsorWithdrawFee: BigInt(env("SPONSOR_WITHDRAW_FEE") ?? "2000"),
+    sponsorMinDeposit: BigInt(env("SPONSOR_MIN_DEPOSIT") ?? "10000"),
+    facilitatorApiKey: env("FACILITATOR_API_KEY"),
     logChunkSize: BigInt(env("LOG_CHUNK_SIZE") ?? "5000"),
   };
 }

@@ -102,6 +102,7 @@ export async function startServices(
     publicClient: client,
     wallet: makeWalletClient(cfg.rpcUrl, cfg.chainId, sponsorKey),
     withdrawFee: cfg.sponsorWithdrawFee,
+    minDeposit: cfg.sponsorMinDeposit,
     log: (m) => log("sponsor", m),
   });
   servers.push(await listen(sponsor, ports.sponsor));
@@ -110,6 +111,7 @@ export async function startServices(
     deployment: d,
     publicClient: client,
     wallet: makeWalletClient(cfg.rpcUrl, cfg.chainId, facilitatorKey),
+    apiKey: cfg.facilitatorApiKey,
     log: (m) => log("facilitator", m),
   });
   servers.push(await listen(facilitator, ports.facilitator));
@@ -122,6 +124,7 @@ export async function startServices(
     assetName: d.tokenName,
     assetVersion: d.tokenVersion,
     payTo: merchantPayTo,
+    facilitatorApiKey: cfg.facilitatorApiKey,
   });
   servers.push(await listen(merchant.app, ports.merchant));
 

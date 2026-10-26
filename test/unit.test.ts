@@ -8,6 +8,9 @@ import { decryptMemo, encryptMemo } from "../src/core/memo";
 import { checkStealthAddress, generateStealthAddress, stealthMetaAddress } from "../src/core/stealth";
 import { decodeHeader, encodeHeader } from "../src/core/x402";
 import { checkPolicy, PolicyError } from "../src/wallet/policy";
+import { splitSignature } from "../src/core/eip3009";
+import { parseSignature, serializeCompactSignature, signatureToCompactSignature } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 
 test("poseidon matches circomlib reference vector", async () => {
   await initPoseidon();
@@ -74,4 +77,15 @@ test("spend policy enforces per-payment, daily and host limits", () => {
   assert.throws(() => checkPolicy(policy, ok, history as never), PolicyError);
   const old = history.map((h) => ({ ...h, ts: Date.now() - 2 * 86_400_000 }));
   checkPolicy(policy, ok, old as never);
+});
+
+test("splitSignature handles 65-byte and compact signatures identically", async () => {
+  const acct = privateKeyToAccount("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
+  for (const msg of ["a", "b", "c", "d"]) {
+    const sig = await acct.signMessage({ message: msg });
+    const compact = serializeCompactSignature(signatureToCompactSignature(parseSignature(sig)));
+    const full = splitSignature(sig);
+    assert.ok(full.v === 27 || full.v === 28);
+    assert.deepEqual(splitSignature(compact), full);
+  }
 });

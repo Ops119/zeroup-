@@ -11,7 +11,7 @@ import {
   type PublicClient,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { ZeroupPool } from "../generated/contracts";
+import { MockUSDC, ZeroupPool } from "../generated/contracts";
 import type { Deployment } from "../core/deployment";
 import { FIELD } from "../core/field";
 import { initPoseidon, poseidon } from "../core/poseidon";
@@ -43,7 +43,18 @@ export interface SponsorInfo {
   pool: Hex;
   token: Hex;
   withdrawFee: string;
+  minDeposit?: string;
 }
+
+export class SponsorError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+  }
+}
+
+const SPONSOR_INFO_TTL_MS = 60_000;
+/** Withdrawals wait for the transaction receipt, so allow for slow blocks. */
+const SPONSOR_TIMEOUT_MS = 180_000;
 
 export interface ZeroupWalletOptions {
   keys: ZeroupKeys;
@@ -82,9 +93,10 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body, (_k, v) => (typeof v === "bigint" ? v.toString() : v)),
+    signal: AbortSignal.timeout(SPONSOR_TIMEOUT_MS),
   });
   const json = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(`${url}: ${json.error ?? res.statusText}`);
+  if (!res.ok) throw new SponsorError(res.status, `${url}: ${json.error ?? res.statusText}`);
   return json;
 }
 
@@ -143,7 +155,7 @@ export class ZeroupWallet {
   private readonly store: StateStore;
   private state!: WalletState;
   private tree!: MerkleTree;
-  private sponsorInfoCache?: SponsorInfo;
+  private sponsorInfoCache?: { info: SponsorInfo; at: number };
   readonly policy: SpendPolicy;
 
   private constructor(private readonly opts: ZeroupWalletOptions) {
@@ -205,13 +217,19 @@ export class ZeroupWallet {
     return privateKeyToAccount(payerPrivateKey(this.opts.keys, index)).address;
   }
 
+  /** Sponsor address and fees, refreshed every minute so fee changes are picked up. */
   async sponsorInfo(): Promise<SponsorInfo> {
-    if (!this.sponsorInfoCache) {
-      const res = await fetch(`${this.opts.sponsorUrl}/v1/info`);
-      if (!res.ok) throw new Error(`sponsor unavailable: ${res.status}`);
-      this.sponsorInfoCache = (await res.json()) as SponsorInfo;
+    const cached = this.sponsorInfoCache;
+    if (cached && Date.now() - cached.at < SPONSOR_INFO_TTL_MS) return cached.info;
+    const res = await fetch(`${this.opts.sponsorUrl}/v1/info`, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) throw new Error(`sponsor unavailable: ${res.status}`);
+    const info = (await res.json()) as SponsorInfo;
+    const d = this.opts.deployment;
+    if (info.chainId !== d.chainId || getAddress(info.pool) !== getAddress(d.pool)) {
+      throw new Error("sponsor serves a different chain or pool than this wallet");
     }
-    return this.sponsorInfoCache;
+    this.sponsorInfoCache = { info, at: Date.now() };
+    return info;
   }
 
   sync(): Promise<void> {
@@ -225,44 +243,46 @@ export class ZeroupWallet {
    * wallet, and it reveals only "this wallet deposited N into the pool".
    */
   deposit(funder: TypedDataSigner, amount: bigint): Promise<{ txHash: Hex; leafIndex: number }> {
-    return this.queue.run(async () => {
-      if (amount <= 0n) throw new Error("amount must be positive");
-      await this.syncUnlocked();
-      const d = this.opts.deployment;
-      const noteIndex = this.allocateNoteIndex();
-      const s = noteSecrets(this.opts.keys, noteIndex);
-      const memo = encryptMemo(this.opts.keys.viewingKey, {
-        v: 1,
-        kind: "deposit",
-        noteIndex,
-        value: amount.toString(),
-        ts: Date.now(),
-      });
-      const now = BigInt(Math.floor(Date.now() / 1000));
-      const message = {
-        from: getAddress(funder.address),
-        to: d.pool,
-        value: amount,
-        validAfter: now - 60n,
-        validBefore: now + 3600n,
-        nonce: depositNonce(d.chainId, d.pool, s.precommitment, memo),
-      };
-      const signature = await funder.signTypedData({
-        domain: tokenDomain(d.tokenName, d.tokenVersion, d.chainId, d.token),
-        types: RECEIVE_WITH_AUTHORIZATION_TYPES,
-        primaryType: "ReceiveWithAuthorization",
-        message,
-      });
-      const res = await postJson<{ txHash: Hex; leafIndex: number }>(`${this.opts.sponsorUrl}/v1/deposit`, {
-        ...message,
-        signature,
-        precommitment: s.precommitment,
-        encryptedNote: memo,
-      });
-      this.log(`deposited ${amount} (note #${noteIndex}, leaf ${res.leafIndex}) tx ${res.txHash}`);
-      await this.syncUnlocked();
-      return res;
+    return this.queue.run(() => this.depositUnlocked(funder, amount));
+  }
+
+  private async depositUnlocked(funder: TypedDataSigner, amount: bigint): Promise<{ txHash: Hex; leafIndex: number }> {
+    if (amount <= 0n) throw new Error("amount must be positive");
+    await this.syncUnlocked();
+    const d = this.opts.deployment;
+    const noteIndex = this.allocateNoteIndex();
+    const s = noteSecrets(this.opts.keys, noteIndex);
+    const memo = encryptMemo(this.opts.keys.viewingKey, {
+      v: 1,
+      kind: "deposit",
+      noteIndex,
+      value: amount.toString(),
+      ts: Date.now(),
     });
+    const now = BigInt(Math.floor(Date.now() / 1000));
+    const message = {
+      from: getAddress(funder.address),
+      to: d.pool,
+      value: amount,
+      validAfter: now - 60n,
+      validBefore: now + 3600n,
+      nonce: depositNonce(d.chainId, d.pool, s.precommitment, memo),
+    };
+    const signature = await funder.signTypedData({
+      domain: tokenDomain(d.tokenName, d.tokenVersion, d.chainId, d.token),
+      types: RECEIVE_WITH_AUTHORIZATION_TYPES,
+      primaryType: "ReceiveWithAuthorization",
+      message,
+    });
+    const res = await postJson<{ txHash: Hex; leafIndex: number }>(`${this.opts.sponsorUrl}/v1/deposit`, {
+      ...message,
+      signature,
+      precommitment: s.precommitment,
+      encryptedNote: memo,
+    });
+    this.log(`deposited ${amount} (note #${noteIndex}, leaf ${res.leafIndex}) tx ${res.txHash}`);
+    await this.syncUnlocked();
+    return res;
   }
 
   /**
@@ -347,6 +367,8 @@ export class ZeroupWallet {
         primaryType: "TransferWithAuthorization",
         message: authorization,
       });
+      record.authValidBefore = Number(authorization.validBefore);
+      this.persist();
       const payload: PaymentPayload = {
         x402Version: X402_VERSION,
         resource,
@@ -386,6 +408,7 @@ export class ZeroupWallet {
   /** Public exit: move shielded funds to any address (e.g. back to the user's main wallet). */
   exit(to: Hex, amount: bigint): Promise<Hex[]> {
     return this.queue.run(async () => {
+      if (amount <= 0n) throw new Error("amount must be positive");
       const recipient = getAddress(to);
       const info = await this.sponsorInfo();
       const fee = BigInt(info.withdrawFee);
@@ -407,6 +430,45 @@ export class ZeroupWallet {
         );
       }
       return txs;
+    });
+  }
+
+  /**
+   * Moves money stranded in one-time payer accounts back into the pool. That
+   * happens when a payer was funded but the merchant never settled (merchant
+   * down, payment rejected, network error). Only payments whose signed
+   * authorization has expired are touched, so a late settlement can never
+   * race the reclaim. The payer signs a gasless deposit like any funder.
+   */
+  reclaim(opts: { now?: number } = {}): Promise<{ payer: Hex; amount: bigint; txHash: Hex }[]> {
+    return this.queue.run(async () => {
+      const now = opts.now ?? Date.now();
+      const d = this.opts.deployment;
+      const minDeposit = BigInt((await this.sponsorInfo()).minDeposit ?? "0");
+      const out: { payer: Hex; amount: bigint; txHash: Hex }[] = [];
+      for (const p of this.state.payments) {
+        if (p.status === "paid" || p.status === "reclaimed") continue;
+        const expiresAt = p.authValidBefore ? p.authValidBefore * 1000 : p.ts + 10 * 60_000;
+        if (now <= expiresAt) continue;
+        const payer = privateKeyToAccount(payerPrivateKey(this.opts.keys, p.payerIndex));
+        const balance = await this.opts.publicClient.readContract({
+          address: d.token,
+          abi: MockUSDC.abi,
+          functionName: "balanceOf",
+          args: [payer.address],
+        });
+        if (balance === 0n) continue;
+        if (balance < minDeposit) {
+          this.log(`payer ${payer.address} holds ${balance}, below the sponsor minimum deposit; left in place`);
+          continue;
+        }
+        const { txHash } = await this.depositUnlocked(payer, balance);
+        p.status = "reclaimed";
+        p.error = `${p.error ? p.error + "; " : ""}unsettled funds returned to the pool`;
+        this.persist();
+        out.push({ payer: payer.address, amount: balance, txHash });
+      }
+      return out;
     });
   }
 
@@ -447,39 +509,50 @@ export class ZeroupWallet {
     const newCommitment = poseidon([remaining, change.precommitment]);
     const encryptedNote = encryptMemo(this.opts.keys.viewingKey, memoFor(changeIndex, remaining));
     const context = withdrawContext(d.chainId, d.pool, recipient, sponsor.address, fee, encryptedNote);
-    const root = this.tree.root();
-    const merklePath = this.tree.path(step.note.leafIndex);
 
-    const started = Date.now();
-    const proof: SolidityProof = await proveWithdraw({
-      root,
-      nullifierHash: spent.nullifierHash,
-      withdrawnValue: step.withdrawn,
-      newCommitment,
-      context,
-      value,
-      nullifier: spent.nullifier,
-      secret: spent.secret,
-      newNullifier: change.nullifier,
-      newSecret: change.secret,
-      pathElements: merklePath.pathElements,
-      pathIndices: merklePath.pathIndices,
-    });
-    this.log(`proved withdrawal of note #${step.note.noteIndex} in ${Date.now() - started}ms`);
-
-    const res = await postJson<{ txHash: Hex; leafIndex: number }>(`${this.opts.sponsorUrl}/v1/withdraw`, {
-      proof,
-      request: {
+    // A busy pool can push our root out of the contract's 64-root history
+    // between sync and submission; resync and re-prove in that case.
+    let res: { txHash: Hex; leafIndex: number };
+    for (let attempt = 1; ; attempt++) {
+      const root = this.tree.root();
+      const merklePath = this.tree.path(step.note.leafIndex);
+      const started = Date.now();
+      const proof: SolidityProof = await proveWithdraw({
         root,
         nullifierHash: spent.nullifierHash,
         withdrawnValue: step.withdrawn,
         newCommitment,
-        recipient,
-        relayer: sponsor.address,
-        fee,
-        encryptedNote,
-      },
-    });
+        context,
+        value,
+        nullifier: spent.nullifier,
+        secret: spent.secret,
+        newNullifier: change.nullifier,
+        newSecret: change.secret,
+        pathElements: merklePath.pathElements,
+        pathIndices: merklePath.pathIndices,
+      });
+      this.log(`proved withdrawal of note #${step.note.noteIndex} in ${Date.now() - started}ms`);
+      try {
+        res = await postJson<{ txHash: Hex; leafIndex: number }>(`${this.opts.sponsorUrl}/v1/withdraw`, {
+          proof,
+          request: {
+            root,
+            nullifierHash: spent.nullifierHash,
+            withdrawnValue: step.withdrawn,
+            newCommitment,
+            recipient,
+            relayer: sponsor.address,
+            fee,
+            encryptedNote,
+          },
+        });
+        break;
+      } catch (err) {
+        const staleRoot = err instanceof SponsorError && err.status === 409 && /unknown merkle root/.test(err.message);
+        if (!staleRoot || attempt >= 3) throw err;
+        await this.syncUnlocked();
+      }
+    }
     step.note.spent = true;
     this.persist();
     await this.syncUnlocked();
