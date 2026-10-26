@@ -92,6 +92,16 @@ npm run serve -- wallet           # dashboard; FUNDER_PRIVATE_KEY holds testnet 
 
 A Docker image runs any of the services: `docker build -t zeroup . && docker run --env-file .env -p 4010:4010 zeroup sponsor`.
 
+## Project website (Railway)
+
+`site/` is a static landing page served by a dependency-free Node server (`site/server.js`). `railway.json` points Railway at `site/Dockerfile` and sets `/healthz` as the health check.
+
+1. In Railway, choose **New Project → Deploy from GitHub repo** and pick this repository.
+2. Railway reads `railway.json`, builds `site/Dockerfile` and injects `PORT`. No variables are needed.
+3. Under **Settings → Networking**, choose **Generate Domain** (or add your own).
+
+To preview it locally: `node site/server.js` serves the page at http://localhost:8080.
+
 ## Layout
 
 | Path | What |

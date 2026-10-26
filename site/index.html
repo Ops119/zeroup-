@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zeroup · Private x402 payments</title>
+<meta name="description" content="Zeroup is a non-custodial wallet that pays x402 invoices privately from a shielded balance, with every fee sponsored. Built for AI agents.">
+<meta name="theme-color" content="#000000">
+<meta property="og:title" content="Zeroup · Private x402 payments">
+<meta property="og:description" content="Gasless, unlinkable x402 payments for AI agents, from a zero-knowledge shielded balance.">
+<meta property="og:image" content="/assets/zeroup-logo.png">
+<link rel="icon" type="image/png" href="/assets/favicon.png">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #050606; --bg-2: #0b0d0d; --panel: #121515; --panel-2: #181c1b; --line: #232827;
+    --text: #eef2f0; --muted: #8f9895; --dim: #5f6865;
+    --mint: #3ee8a5; --mint-2: #8af5c9; --mint-soft: rgba(62, 232, 165, .10); --mint-line: rgba(62, 232, 165, .32);
+    --warn: #ffb547;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --max: 1120px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Inter, sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: var(--mint); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
+  code, pre { font-family: var(--mono); }
+
+  /* nav */
+  nav { position: sticky; top: 0; z-index: 10; background: rgba(5, 6, 6, .82); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 16px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 700; font-size: 19px; letter-spacing: .2px; }
+  .brand:hover { text-decoration: none; }
+  .brand img { width: 36px; height: 36px; mix-blend-mode: screen; }
+  .brand .word span { color: var(--mint); }
+  .links { display: flex; gap: 22px; align-items: center; font-size: 14px; }
+  .links a { color: var(--muted); }
+  .links a:hover { color: var(--text); text-decoration: none; }
+  @media (max-width: 760px) { .links a:not(.btn) { display: none; } }
+
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 10px; font-weight: 600; font-size: 15px; border: 1px solid var(--mint); background: var(--mint); color: #03130c !important; }
+  .btn:hover { text-decoration: none; filter: brightness(1.08); }
+  .btn.ghost { background: transparent; color: var(--mint) !important; border-color: var(--mint-line); }
+  .btn.ghost:hover { background: var(--mint-soft); }
+  .btn.sm { padding: 7px 14px; font-size: 14px; }
+
+  /* hero */
+  .hero { position: relative; overflow: hidden; padding: 84px 0 72px; border-bottom: 1px solid var(--line); }
+  .hero::before { content: ""; position: absolute; inset: -40% -10% auto auto; width: 720px; height: 720px; background: radial-gradient(circle, rgba(62, 232, 165, .16), transparent 62%); pointer-events: none; }
+  .hero .wrap { position: relative; display: grid; grid-template-columns: 1.15fr .85fr; gap: 48px; align-items: center; }
+  @media (max-width: 900px) { .hero .wrap { grid-template-columns: 1fr; } .hero-art { order: -1; max-width: 260px; } }
+  .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--mint); background: var(--mint-soft); border: 1px solid var(--mint-line); padding: 4px 12px; border-radius: 999px; font-family: var(--mono); }
+  h1 { font-size: clamp(36px, 5.4vw, 60px); line-height: 1.06; margin: 18px 0 18px; letter-spacing: -1.2px; }
+  h1 em { font-style: normal; color: var(--mint); }
+  .lead { font-size: 19px; color: var(--muted); max-width: 580px; margin: 0 0 28px; }
+  .cta { display: flex; gap: 12px; flex-wrap: wrap; }
+  /* The logo sits on pure black; "screen" blending drops the black so only the glowing mark shows. */
+  .hero-art img { width: 100%; height: auto; display: block; mix-blend-mode: screen; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 40px; }
+  @media (max-width: 640px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .stat b { display: block; font-size: 22px; color: var(--mint); font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 13px; color: var(--muted); }
+
+  /* sections */
+  section { padding: 84px 0; border-bottom: 1px solid var(--line); }
+  section.alt { background: var(--bg-2); }
+  .kicker { font-family: var(--mono); font-size: 13px; color: var(--mint); text-transform: uppercase; letter-spacing: 1.4px; }
+  h2 { font-size: clamp(28px, 3.6vw, 40px); line-height: 1.15; margin: 10px 0 14px; letter-spacing: -.6px; }
+  .sub { color: var(--muted); max-width: 680px; margin: 0 0 40px; font-size: 17px; }
+
+  .grid { display: grid; gap: 16px; }
+  .grid > * { min-width: 0; }
+  .g2 { grid-template-columns: repeat(2, 1fr); } .g3 { grid-template-columns: repeat(3, 1fr); } .g4 { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 900px) { .g3, .g4 { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 640px) { .g2, .g3, .g4 { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px; min-width: 0; }
+  .card h3 { margin: 0 0 8px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .icon { width: 36px; height: 36px; border-radius: 9px; background: var(--mint-soft); border: 1px solid var(--mint-line); display: grid; place-items: center; margin-bottom: 14px; color: var(--mint); }
+  .icon svg { width: 18px; height: 18px; }
+
+  /* problem */
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .compare { grid-template-columns: 1fr; } }
+  .compare .card.bad { border-color: rgba(255, 107, 107, .3); }
+  .compare .card.good { border-color: var(--mint-line); background: linear-gradient(160deg, #0f231b, var(--panel) 65%); }
+  .tag { display: inline-block; font-size: 12px; font-family: var(--mono); padding: 2px 10px; border-radius: 999px; margin-bottom: 10px; }
+  .tag.bad { color: #ff8b8b; background: rgba(255, 107, 107, .1); }
+  .tag.good { color: var(--mint); background: var(--mint-soft); }
+  .chain { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 14px; line-height: 1.9; }
+  .chain .addr { color: var(--text); }
+  .chain .hl { color: #ff8b8b; }
+  .chain .ok { color: var(--mint); }
+
+  /* flow */
+  .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; position: relative; }
+  @media (max-width: 900px) { .flow { grid-template-columns: 1fr 1fr; gap: 16px; } }
+  @media (max-width: 560px) { .flow { grid-template-columns: 1fr; } }
+  .step { position: relative; padding: 22px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; margin-right: 22px; }
+  @media (max-width: 900px) { .step { margin-right: 0; } }
+  .step:not(:last-child)::after { content: "→"; position: absolute; right: -19px; top: 50%; transform: translateY(-50%); color: var(--mint); font-size: 18px; }
+  @media (max-width: 900px) { .step::after { display: none; } }
+  .step .n { font-family: var(--mono); font-size: 12px; color: var(--mint); }
+  .step h3 { margin: 6px 0 8px; font-size: 17px; }
+  .step p { margin: 0; color: var(--muted); font-size: 14.5px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 13px; text-transform: uppercase; letter-spacing: .8px; }
+  td:first-child { font-weight: 600; white-space: nowrap; }
+  .tbl { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow-x: auto; margin-top: 28px; }
+  .yes { color: var(--mint); } .no { color: var(--dim); }
+
+  /* code */
+  pre { margin: 0; background: #000; border: 1px solid var(--line); border-radius: 12px; padding: 18px; overflow-x: auto; font-size: 13.5px; line-height: 1.65; color: #cfd8d4; }
+  .c-k { color: var(--mint); } .c-s { color: var(--mint-2); } .c-c { color: var(--dim); }
+  .code-label { font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+
+  /* roadmap */
+  .roadmap .card h3 { display: flex; align-items: center; gap: 10px; }
+  .pill { font-size: 11px; font-family: var(--mono); padding: 2px 9px; border-radius: 999px; font-weight: 500; }
+  .pill.done { background: var(--mint); color: #03130c; }
+  .pill.next { background: var(--mint-soft); color: var(--mint); border: 1px solid var(--mint-line); }
+  .pill.later { background: var(--panel-2); color: var(--muted); border: 1px solid var(--line); }
+  ul.check { list-style: none; padding: 0; margin: 12px 0 0; }
+  ul.check li { padding: 5px 0 5px 24px; position: relative; color: var(--muted); font-size: 14.5px; }
+  ul.check li::before { content: ""; position: absolute; left: 2px; top: 13px; width: 8px; height: 8px; border-radius: 2px; background: var(--dim); }
+  .done ul.check li::before, ul.check.done li::before { background: var(--mint); }
+
+  .notice { display: flex; gap: 16px; align-items: flex-start; background: rgba(255, 181, 71, .07); border: 1px solid rgba(255, 181, 71, .3); border-radius: 14px; padding: 20px 22px; margin-top: 28px; }
+  .notice b { color: var(--warn); }
+  .notice p { margin: 4px 0 0; color: var(--muted); font-size: 15px; }
+
+  .final { text-align: center; padding: 96px 0; background: radial-gradient(ellipse at center, rgba(62, 232, 165, .12), transparent 60%); }
+  .final .cta { justify-content: center; }
+  footer { padding: 30px 0 40px; color: var(--dim); font-size: 14px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="/assets/zeroup-logo.png" alt="" width="36" height="36"><span class="word">zero<span>up</span></span></a>
+    <div class="links">
+      <a href="#problem">Why</a>
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#developers">Developers</a>
+      <a href="#roadmap">Roadmap</a>
+      <a class="btn sm" href="https://github.com/Ops119/zeroup-">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <div>
+      <span class="eyebrow">● x402 v2 · Base · zero-knowledge</span>
+      <h1>Private, gasless payments for <em>AI agents</em>.</h1>
+      <p class="lead">Zeroup is a non-custodial smart wallet that pays x402 invoices from a shielded balance. Every payment comes from a fresh one-time account, and every fee is sponsored. Merchants get paid, but nobody can trace the payment back to your wallet.</p>
+      <div class="cta">
+        <a class="btn" href="https://github.com/Ops119/zeroup-">View the code</a>
+        <a class="btn ghost" href="#how">How it works</a>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>0 gas</b><span>paid by users</span></div>
+        <div class="stat"><b>~1s</b><span>ZK proof per payment</span></div>
+        <div class="stat"><b>1 : 1</b><span>fresh account per payment</span></div>
+        <div class="stat"><b>x402</b><span>v2 compatible</span></div>
+      </div>
+    </div>
+    <div class="hero-art"><img src="/assets/zeroup-logo.png" alt="Zeroup logo" width="512" height="512"></div>
+  </div>
+</header>
+
+<section id="problem">
+  <div class="wrap">
+    <div class="kicker">The problem</div>
+    <h2>x402 payments put your whole spending history on display.</h2>
+    <p class="sub">x402 lets agents pay for APIs over plain HTTP. But each payment shows the payer's address, the amount and the time on chain, so the merchant, the facilitator and every chain watcher can link all of an agent's calls together.</p>
+    <div class="compare">
+      <div class="card bad">
+        <span class="tag bad">standard x402</span>
+        <h3>One wallet, every payment linked</h3>
+        <p>Every API call is paid from the same address, which is easy to tie back to a funding source.</p>
+        <div class="chain">
+          <span class="addr">0x90F7…b906</span> → weather API <span class="hl">0.01</span><br>
+          <span class="addr">0x90F7…b906</span> → market data <span class="hl">0.02</span><br>
+          <span class="addr">0x90F7…b906</span> → research <span class="hl">0.05</span><br>
+          <span class="hl">⚠ one identity, full history</span>
+        </div>
+      </div>
+      <div class="card good">
+        <span class="tag good">with Zeroup</span>
+        <h3>A fresh account every time</h3>
+        <p>Each call is paid by a one-time account funded from a shielded pool. None of them share any history with each other or with your wallet.</p>
+        <div class="chain">
+          <span class="addr">0x2057…81B5</span> → weather API <span class="ok">0.01</span><br>
+          <span class="addr">0xC983…97dE</span> → market data <span class="ok">0.02</span><br>
+          <span class="addr">0xb6bc…5921</span> → research <span class="ok">0.05</span><br>
+          <span class="ok">✓ no shared history, no link to the funder</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="how">
+  <div class="wrap">
+    <div class="kicker">How it works</div>
+    <h2>Deposit once. Pay privately, again and again.</h2>
+    <p class="sub">Your money sits in a shielded pool. Each payment is made from a fresh account funded out of that pool with a zero-knowledge proof, and a sponsor pays all the gas.</p>
+    <div class="flow">
+      <div class="step"><div class="n">01 · DEPOSIT</div><h3>Shield your USDC</h3><p>Your wallet signs a gasless EIP-3009 authorization. The sponsor submits it and your USDC enters the pool as a private note.</p></div>
+      <div class="step"><div class="n">02 · REQUEST</div><h3>Agent hits a paywall</h3><p>An API answers HTTP 402 with its price. Zeroup checks your spending policy: per-payment cap, daily budget and allowed hosts.</p></div>
+      <div class="step"><div class="n">03 · PROVE</div><h3>Fund a one-time account</h3><p>A Groth16 proof spends a note without revealing which one. The pool pays exactly the price into a brand-new account.</p></div>
+      <div class="step"><div class="n">04 · PAY</div><h3>Settle via x402</h3><p>The one-time account signs the payment, the facilitator settles it and pays the gas, and the API returns your data.</p></div>
+    </div>
+
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Who</th><th>Sees</th><th>Cannot see</th></tr></thead>
+        <tbody>
+          <tr><td>Merchant / facilitator</td><td>A one-time payer, the amount, the resource</td><td class="yes">Your wallet, your other payments</td></tr>
+          <tr><td>Chain observer</td><td>Deposits into and withdrawals out of the pool</td><td class="yes">Which deposit funded which payment</td></tr>
+          <tr><td>Gas sponsor</td><td>Valid proofs and their fees</td><td class="yes">Who owns the notes being spent</td></tr>
+          <tr><td>Your auditor (viewing key)</td><td>Your full history and balance</td><td class="yes">Nothing to spend with: read-only</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <div class="kicker">Features</div>
+    <h2>Everything an agent wallet needs, private by default.</h2>
+    <p class="sub">Built on open standards (x402, EIP-3009, Groth16, Poseidon, ERC-5564), with Zeroup's own engineering focused on the private payment path.</p>
+    <div class="grid g3">
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></div><h3>Shielded balance</h3><p>A Poseidon Merkle-tree pool with Groth16 proofs. Spend part of a note and the change is re-committed privately.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/></svg></div><h3>One-time payers</h3><p>A fresh account derived for every invoice. Merchants see an address with no past and no future.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></div><h3>Zero gas</h3><p>Deposits, withdrawals and payments are all sponsored. Users never need ETH; fees are taken in USDC, bound into the proof.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg></div><h3>x402 facilitator</h3><p>A built-in /verify, /settle and /supported service for the x402 v2 <code>exact</code> scheme, plus a one-line paywall for Express APIs.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></div><h3>Viewing keys</h3><p>Share read-only access with an accountant or auditor. They see the full history; they can never move funds.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 4 6v6c0 5 3.5 8.5 8 10 4.5-1.5 8-5 8-10V6z"/></svg></div><h3>Compliance built in</h3><p>Screened deposits, and blocked addresses are refused by the pool, the sponsor and the facilitator. Anyone can always exit publicly.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10M18 20V4M6 20v-4"/></svg></div><h3>Spend policy</h3><p>Per-payment limits, rolling daily budgets and host allowlists, checked before any money leaves the pool.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></div><h3>Seed recovery</h3><p>One 24-word phrase restores every note and payment. Encrypted memos on chain let the wallet rebuild itself.</p></div>
+      <div class="card"><div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v6h-6"/></svg></div><h3>Reclaim &amp; exit</h3><p>Unsettled payments flow back into the pool automatically after expiry, and you can withdraw to any public address.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="alt" id="developers">
+  <div class="wrap">
+    <div class="kicker">For developers</div>
+    <h2>Two lines to pay. Two lines to get paid.</h2>
+    <p class="sub">Agents swap <code>fetch</code> for a private version that answers 402s automatically. APIs wrap a route with the paywall and point it at the Zeroup facilitator.</p>
+    <div class="grid g2">
+      <div>
+        <p class="code-label">agent.ts · pay privately</p>
+<pre><span class="c-k">const</span> wallet = <span class="c-k">await</span> ZeroupWallet.open({ keys, deployment, ... });
+<span class="c-k">const</span> privateFetch = createPrivateFetch(wallet);
+
+<span class="c-c">// 402 → prove → one-time payer → settle → data</span>
+<span class="c-k">const</span> { response, payment } =
+  <span class="c-k">await</span> privateFetch(<span class="c-s">"https://api.example.com/report"</span>);</pre>
+      </div>
+      <div>
+        <p class="code-label">server.ts · charge per call</p>
+<pre>app.get(<span class="c-s">"/report"</span>, paid(
+  { facilitatorUrl, network: <span class="c-s">"eip155:8453"</span>,
+    asset: USDC, payTo },
+  { price: <span class="c-s">"50000"</span>, <span class="c-c">// $0.05</span>
+    description: <span class="c-s">"Research report"</span>,
+    handler: (req) =&gt; buildReport(req) },
+));</pre>
+      </div>
+    </div>
+    <div class="grid g2" style="margin-top: 16px">
+      <div>
+        <p class="code-label">terminal · try it locally</p>
+<pre>git clone https://github.com/Ops119/zeroup-
+cd zeroup- &amp;&amp; npm install &amp;&amp; npm run build
+npm run demo   <span class="c-c"># full private-payment run</span>
+npm run dev    <span class="c-c"># dashboard on :4040</span></pre>
+      </div>
+      <div>
+        <p class="code-label">cli · agent wallet</p>
+<pre>zeroup init                <span class="c-c"># encrypted keystore</span>
+zeroup deposit 10          <span class="c-c"># gasless</span>
+zeroup pay https://api.example.com/x
+zeroup audit $(zeroup viewing-key)</pre>
+      </div>
+    </div>
+
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Component</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr><td>ZeroupPool.sol</td><td>Shielded USDC pool: incremental Poseidon tree (depth 20), nullifiers, gasless deposits, proof-bound withdrawals</td></tr>
+          <tr><td>withdraw.circom</td><td>Groth16 circuit (13k constraints) binding recipient, relayer, fee and encrypted memo</td></tr>
+          <tr><td>Sponsor</td><td>Submits deposits and withdrawals and pays the gas; never holds user funds</td></tr>
+          <tr><td>Facilitator</td><td>x402 v2 <code>/verify</code>, <code>/settle</code>, <code>/supported</code> for EIP-3009 <code>exact</code> payments</td></tr>
+          <tr><td>Wallet SDK + CLI</td><td>Key engine, private fetch, spend policy, auditor, reclaim, local dashboard</td></tr>
+          <tr><td>Screener.sol</td><td>Compliance list enforced at deposit, withdrawal and settlement</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="roadmap">
+  <div class="wrap">
+    <div class="kicker">Roadmap</div>
+    <h2>Where Zeroup is today.</h2>
+    <p class="sub">The EVM payment path works end to end on a local chain and is set up for Base Sepolia. Next comes Solana, smart accounts and the road to mainnet.</p>
+    <div class="grid g3 roadmap">
+      <div class="card done">
+        <h3>Phase 0–1 <span class="pill done">built</span></h3>
+        <p>Private agent wallet on EVM.</p>
+        <ul class="check done">
+          <li>Shielded pool + Groth16 circuit</li>
+          <li>Gas sponsor &amp; x402 facilitator</li>
+          <li>Wallet SDK, CLI, dashboard</li>
+          <li>Viewing keys &amp; screening</li>
+          <li>22 tests incl. adversarial cases</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Phase 2 <span class="pill next">next</span></h3>
+        <p>Both chains, better accounts.</p>
+        <ul class="check">
+          <li>Solana: Kora fee payer, Squads/Swig</li>
+          <li>ERC-4337 / EIP-7702 + passkeys</li>
+          <li>Association-set proofs</li>
+          <li>Network privacy relay (Tor / Nym)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Phase 3 <span class="pill later">later</span></h3>
+        <p>Mainnet and scale.</p>
+        <ul class="check">
+          <li>Multi-party trusted-setup ceremony</li>
+          <li>Independent audits + bug bounty</li>
+          <li>Base &amp; Solana mainnet</li>
+          <li>Cross-chain privacy</li>
+        </ul>
+      </div>
+    </div>
+    <div class="notice">
+      <div style="font-size: 22px">⚠</div>
+      <div><b>Testnet only.</b><p>Zeroup is unaudited, and its zero-knowledge keys come from a development setup. Don't use it with real funds until the ceremony and audits are done.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <img src="/assets/zeroup-logo.png" alt="" width="140" height="140" style="mix-blend-mode: screen">
+    <h2>Pay for anything. Leave no trail.</h2>
+    <p class="sub" style="margin-left: auto; margin-right: auto">Zeroup is open source. Run the demo in a minute, or build private payments into your own agent.</p>
+    <div class="cta">
+      <a class="btn" href="https://github.com/Ops119/zeroup-">Get started on GitHub</a>
+      <a class="btn ghost" href="https://github.com/Ops119/zeroup-/blob/main/docs/ARCHITECTURE.md">Read the architecture</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© Zeroup · private x402 payments</span>
+    <span><a href="https://github.com/Ops119/zeroup-">GitHub</a> · <a href="https://github.com/Ops119/zeroup-/blob/main/docs/SECURITY.md">Security</a></span>
+  </div>
+</footer>
+</body>
+</html>
