@@ -1,4 +1,4 @@
-<p align="center"><img src="web/brand/zeroup-logo.png" alt="Zeroup" width="360"></p>
+<p align="center"><img src="web/brand/zeroup-logo.png" alt="Zeroup" width="240"></p>
 
 # Zeroup
 
