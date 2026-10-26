@@ -1,3 +1,5 @@
+<p align="center"><img src="web/brand/zeroup-logo.png" alt="Zeroup" width="360"></p>
+
 # Zeroup
 
 Zeroup is a non-custodial smart wallet that pays [x402](https://github.com/coinbase/x402) invoices privately, with every fee sponsored. Apps and AI agents pay for APIs, and the payments can't be traced back to the wallet that funded them.

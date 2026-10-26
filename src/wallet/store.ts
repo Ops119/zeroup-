@@ -36,6 +36,8 @@ export interface WalletState {
   version: 1;
   chainId: number;
   pool: string;
+  /** Hash of the pool's deployment block; a mismatch means a different chain (e.g. a reset dev node). */
+  anchor?: string;
   lastSyncedBlock: string;
   leaves: string[];
   notes: NoteRecord[];
@@ -44,11 +46,12 @@ export interface WalletState {
   nextPayerIndex: number;
 }
 
-export function emptyState(chainId: number, pool: string, fromBlock: bigint): WalletState {
+export function emptyState(chainId: number, pool: string, fromBlock: bigint, anchor?: string): WalletState {
   return {
     version: 1,
     chainId,
     pool,
+    anchor,
     lastSyncedBlock: (fromBlock - 1n).toString(),
     leaves: [],
     notes: [],

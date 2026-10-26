@@ -157,10 +157,20 @@ export class ZeroupWallet {
     const w = new ZeroupWallet(opts);
     const d = opts.deployment;
     const loaded = w.store.load();
+    // Local state is only a cache: everything in it can be rebuilt from the
+    // chain and the seed, so discard it whenever it may belong to another chain.
+    const anchor = await opts.publicClient
+      .getBlock({ blockNumber: BigInt(d.deployBlock) })
+      .then((b) => b.hash, () => undefined);
+    const latest = await opts.publicClient.getBlockNumber();
     w.state =
-      loaded && loaded.chainId === d.chainId && loaded.pool.toLowerCase() === d.pool.toLowerCase()
+      loaded &&
+      loaded.chainId === d.chainId &&
+      loaded.pool.toLowerCase() === d.pool.toLowerCase() &&
+      loaded.anchor === anchor &&
+      BigInt(loaded.lastSyncedBlock) <= latest
         ? loaded
-        : emptyState(d.chainId, d.pool, BigInt(d.deployBlock));
+        : emptyState(d.chainId, d.pool, BigInt(d.deployBlock), anchor);
     w.tree = new MerkleTree(TREE_LEVELS);
     for (const leaf of w.state.leaves) w.tree.insert(BigInt(leaf));
     return w;
