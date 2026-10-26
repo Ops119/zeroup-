@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zeroup · Live demo</title>
+<meta name="description" content="Run Zeroup end to end in your browser: a gasless deposit, three private x402 payments with real zero-knowledge proofs, and what each party can see.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" type="image/png" href="/assets/favicon.png">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #050606; --panel: #121515; --panel-2: #181c1b; --line: #232827;
+    --text: #eef2f0; --muted: #8f9895; --dim: #5f6865;
+    --mint: #3ee8a5; --mint-soft: rgba(62, 232, 165, .10); --mint-line: rgba(62, 232, 165, .32);
+    --bad: #ff7b7b; --warn: #ffb547;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15.5px/1.55 system-ui, -apple-system, "Segoe UI", Inter, sans-serif; -webkit-font-smoothing: antialiased; }
+  a { color: var(--mint); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px; }
+  .mono { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+
+  nav { position: sticky; top: 0; z-index: 10; background: rgba(5, 6, 6, .85); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; gap: 16px; }
+  .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 700; font-size: 19px; }
+  .brand:hover { text-decoration: none; }
+  .brand img { width: 36px; height: 36px; mix-blend-mode: screen; }
+  .brand .word span { color: var(--mint); }
+  .links { display: flex; gap: 20px; align-items: center; font-size: 14px; }
+  .links a { color: var(--muted); }
+  .links a:hover { color: var(--text); text-decoration: none; }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 22px; border-radius: 10px; font: inherit; font-weight: 650; font-size: 16px; border: 1px solid var(--mint); background: var(--mint); color: #03130c; cursor: pointer; }
+  a.btn, a.btn:hover { color: #03130c; text-decoration: none; }
+  .btn:hover:not(:disabled) { filter: brightness(1.08); text-decoration: none; }
+  .btn:disabled { opacity: .55; cursor: progress; }
+  .btn.sm { padding: 7px 14px; font-size: 14px; }
+
+  header { padding: 48px 0 28px; }
+  .kicker { font-family: var(--mono); font-size: 13px; color: var(--mint); text-transform: uppercase; letter-spacing: 1.4px; }
+  h1 { font-size: clamp(30px, 4.4vw, 46px); line-height: 1.1; margin: 10px 0 12px; letter-spacing: -.8px; }
+  .lead { color: var(--muted); max-width: 760px; margin: 0 0 22px; font-size: 17px; }
+  .bar { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12.5px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  .pill.ok { border-color: var(--mint-line); color: var(--mint); } .pill.ok .dot { background: var(--mint); box-shadow: 0 0 8px var(--mint); }
+  .pill.warn { border-color: rgba(255, 181, 71, .35); color: var(--warn); } .pill.warn .dot { background: var(--warn); }
+  .note { color: var(--dim); font-size: 13.5px; margin-top: 14px; }
+
+  .layout { display: grid; grid-template-columns: 330px 1fr; gap: 20px; padding-bottom: 72px; align-items: start; }
+  @media (max-width: 960px) { .layout { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; min-width: 0; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .9px; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  .stack > * + * { margin-top: 16px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .two { grid-template-columns: 1fr; } }
+
+  /* steps */
+  .steps { position: sticky; top: 84px; }
+  @media (max-width: 960px) { .steps { position: static; } }
+  ol.timeline { list-style: none; margin: 0; padding: 0; }
+  ol.timeline li { position: relative; padding: 0 0 18px 34px; color: var(--dim); }
+  ol.timeline li:last-child { padding-bottom: 0; }
+  ol.timeline li::before { content: attr(data-n); position: absolute; left: 0; top: 0; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); display: grid; place-items: center; font-family: var(--mono); font-size: 11px; color: var(--dim); background: var(--bg); }
+  ol.timeline li:not(:last-child)::after { content: ""; position: absolute; left: 11px; top: 24px; bottom: 2px; width: 1px; background: var(--line); }
+  ol.timeline li.active { color: var(--text); }
+  ol.timeline li.active::before { border-color: var(--mint); color: var(--mint); box-shadow: 0 0 0 4px var(--mint-soft); }
+  ol.timeline li.done { color: var(--muted); }
+  ol.timeline li.done::before { content: "✓"; background: var(--mint); border-color: var(--mint); color: #03130c; font-weight: 700; }
+  ol.timeline li .t { font-weight: 600; font-size: 14.5px; display: block; }
+  ol.timeline li .s { font-size: 13px; color: var(--dim); }
+
+  .metric { font-size: 30px; font-weight: 700; color: var(--mint); font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .sub { color: var(--muted); font-size: 13.5px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .zero { color: var(--mint); font-weight: 600; }
+
+  .pay { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--panel-2); animation: in .35s ease; }
+  .pay + .pay { margin-top: 10px; }
+  .pay-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .pay-head b { font-family: var(--mono); font-size: 14px; }
+  .price { color: var(--mint); font-weight: 650; }
+  .pay pre { margin: 10px 0 0; background: #000; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12px; color: #cfd8d4; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+  @keyframes in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+  .tbl { overflow-x: auto; }
+  .tbl td:nth-child(-n+2) { white-space: nowrap; }
+  .empty { color: var(--dim); font-size: 14px; }
+  .verdict { margin-top: 12px; font-size: 14px; display: grid; gap: 4px; }
+  .good { color: var(--mint); } .bad { color: var(--bad); }
+
+  .result { display: none; border: 1px solid var(--mint-line); background: linear-gradient(160deg, #0f231b, var(--panel) 70%); }
+  .result.show { display: block; animation: in .4s ease; }
+  .result .big { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+  .result ul { margin: 8px 0 0; padding-left: 20px; color: var(--muted); }
+  .error { display: none; border-color: rgba(255, 123, 123, .4); color: var(--bad); }
+  .error.show { display: block; }
+
+  details summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+  #log { margin: 10px 0 0; background: #000; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-family: var(--mono); font-size: 12px; color: #9fb0a9; max-height: 260px; overflow: auto; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<nav>
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/assets/zeroup-logo.png" alt="" width="36" height="36"><span class="word">zero<span>up</span></span></a>
+    <div class="links">
+      <a href="/">Overview</a>
+      <a class="btn sm" href="https://github.com/Ops119/zeroup-">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header>
+  <div class="wrap">
+    <div class="kicker">Live demo</div>
+    <h1>Watch an AI agent pay privately, in real time.</h1>
+    <p class="lead">This runs the real Zeroup stack on this server: the shielded-pool contracts on a private test chain, the gas sponsor, the x402 facilitator and a paid API. Press run to watch a fresh wallet make a gasless deposit and pay three APIs, each from a fresh, unlinkable account with a real zero-knowledge proof.</p>
+    <div class="bar">
+      <button class="btn" id="run" disabled>Starting…</button>
+      <span class="pill" id="status"><span class="dot"></span><span id="statusText">connecting</span></span>
+    </div>
+    <p class="note">Test USDC on a private chain inside this server: no real money, no wallet needed. Each run takes about 5 seconds.</p>
+  </div>
+</header>
+
+<main class="wrap layout">
+  <aside class="card steps">
+    <h2>Steps</h2>
+    <ol class="timeline" id="steps">
+      <li data-n="1"><span class="t">Public wallet</span><span class="s">5 test USDC, zero ETH</span></li>
+      <li data-n="2"><span class="t">Gasless deposit</span><span class="s">1 USDC into the shielded pool</span></li>
+      <li data-n="3"><span class="t">Three private payments</span><span class="s">x402 + ZK proof each</span></li>
+      <li data-n="4"><span class="t">What others see</span><span class="s">merchant and chain view</span></li>
+      <li data-n="5"><span class="t">Auditor view</span><span class="s">viewing key, read-only</span></li>
+      <li data-n="6"><span class="t">Compliance check</span><span class="s">screened address blocked</span></li>
+    </ol>
+  </aside>
+
+  <div class="stack">
+    <div class="card result" id="result"></div>
+    <div class="card error" id="error"></div>
+
+    <div class="two">
+      <div class="card">
+        <h2>Your public wallet</h2>
+        <div class="mono" id="funderAddr">–</div>
+        <dl class="kv" style="margin-top: 12px">
+          <dt>Test USDC</dt><dd id="funderUsdc">–</dd>
+          <dt>ETH for gas</dt><dd id="funderEth">–</dd>
+          <dt>Gas paid to deposit</dt><dd id="gasPaid">–</dd>
+        </dl>
+      </div>
+      <div class="card">
+        <h2>Shielded balance</h2>
+        <div class="metric" id="shielded">–</div>
+        <div class="sub" id="shieldedSub">Private notes in the pool. Nobody can see whose they are.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Agent payments</h2>
+      <div id="payments"><div class="empty">Payments will appear here as the agent calls each paid API.</div></div>
+    </div>
+
+    <div class="two">
+      <div class="card">
+        <h2>What the merchant saw</h2>
+        <div class="tbl"><table><thead><tr><th>Payer</th><th>Amount</th></tr></thead><tbody id="merchant"><tr><td colspan="2" class="empty">–</td></tr></tbody></table></div>
+        <div class="verdict" id="verdict"></div>
+      </div>
+      <div class="card">
+        <h2>What the auditor sees</h2>
+        <div class="tbl"><table><thead><tr><th>Kind</th><th>Amount</th><th>Detail</th></tr></thead><tbody id="audit"><tr><td colspan="3" class="empty">–</td></tr></tbody></table></div>
+        <div class="sub" id="auditTotals" style="margin-top: 10px"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Compliance</h2>
+      <div id="screening" class="empty">A sanctioned address will try to deposit at the end of the run.</div>
+    </div>
+
+    <div class="card">
+      <details>
+        <summary>Live log</summary>
+        <div id="log"></div>
+      </details>
+    </div>
+  </div>
+</main>
+<script src="/demo.js"></script>
+</body>
+</html>

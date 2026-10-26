@@ -28,24 +28,53 @@ async function rpcReady(url: string): Promise<boolean> {
   }
 }
 
-/** Starts a Hardhat JSON-RPC node, or reuses one already listening on the URL. */
+/** Path to the Anvil binary from @foundry-rs/anvil, if installed for this platform. */
+function anvilBinary(): string | undefined {
+  const arch = { x64: "amd64", arm64: "arm64" }[process.arch as string];
+  const os = { linux: "linux", darwin: "darwin", win32: "win32" }[process.platform as string];
+  if (!arch || !os) return undefined;
+  try {
+    return require.resolve(`@foundry-rs/anvil-${os}-${arch}/bin/anvil${os === "win32" ? ".exe" : ""}`);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Starts a local JSON-RPC chain (chainId 31337, the standard "test test ... junk"
+ * dev accounts), or reuses one already listening on the URL. Uses Anvil when
+ * available: Hardhat's node holds on to GBs of memory after a few ZK-heavy
+ * transactions. CHAIN_BACKEND=hardhat forces Hardhat.
+ */
 export async function startLocalChain(rpcUrl: string): Promise<{ stop: () => void; reused: boolean }> {
   if (await rpcReady(rpcUrl)) return { stop: () => {}, reused: true };
   const { hostname, port } = new URL(rpcUrl);
-  const child: ChildProcess = spawn(
-    process.execPath,
-    [require.resolve("hardhat/internal/cli/cli"), "node", "--hostname", hostname, "--port", port],
-    { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] },
-  );
+  const anvil = process.env.CHAIN_BACKEND === "hardhat" ? undefined : anvilBinary();
+  const child: ChildProcess = anvil
+    ? spawn(anvil, ["--host", hostname, "--port", port, "--chain-id", "31337", "--silent"], { stdio: ["ignore", "ignore", "pipe"] })
+    : spawn(process.execPath, [require.resolve("hardhat/internal/cli/cli"), "node", "--hostname", hostname, "--port", port], {
+        cwd: ROOT,
+        stdio: ["ignore", "ignore", "pipe"],
+      });
   let stderr = "";
   child.stderr?.on("data", (b) => (stderr += b.toString()));
   for (let i = 0; i < 120; i++) {
-    if (child.exitCode !== null) throw new Error(`hardhat node exited: ${stderr}`);
-    if (await rpcReady(rpcUrl)) return { stop: () => child.kill(), reused: false };
+    if (child.exitCode !== null) throw new Error(`local chain exited: ${stderr}`);
+    if (await rpcReady(rpcUrl)) {
+      if (!anvil) {
+        // `hardhat node` logs every call with a full EVM trace; keep that off.
+        await fetch(rpcUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "hardhat_setLoggingEnabled", params: [false] }),
+        });
+      }
+      return { stop: () => child.kill(), reused: false };
+    }
     await new Promise((r) => setTimeout(r, 250));
   }
   child.kill();
-  throw new Error("hardhat node did not start");
+  throw new Error("local chain did not start");
 }
 
 /**

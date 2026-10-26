@@ -1,0 +1,11 @@
+# Railway image: landing page + live demo (local chain, contracts, sponsor,
+# facilitator and paid API all inside this container; only $PORT is public).
+FROM node:22-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npx hardhat compile && node scripts/export-abis.js
+ENV NODE_ENV=production
+EXPOSE 8080
+CMD ["npx", "tsx", "src/bin/web.ts"]

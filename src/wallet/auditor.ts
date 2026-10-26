@@ -36,7 +36,7 @@ export async function auditWithViewingKey(
   d: Deployment,
   chunk = 5000n,
 ): Promise<AuditReport> {
-  const latest = await client.getBlockNumber();
+  const latest = await client.getBlockNumber({ cacheTime: 0 });
   const entries: AuditEntry[] = [];
   const noteValues = new Map<number, bigint>();
   const spentNotes = new Set<number>();

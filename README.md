@@ -92,15 +92,24 @@ npm run serve -- wallet           # dashboard; FUNDER_PRIVATE_KEY holds testnet 
 
 A Docker image runs any of the services: `docker build -t zeroup . && docker run --env-file .env -p 4010:4010 zeroup sponsor`.
 
-## Project website (Railway)
+## Website and live demo (Railway)
 
-`site/` is a static landing page served by a dependency-free Node server (`site/server.js`). `railway.json` points Railway at `site/Dockerfile` and sets `/healthz` as the health check.
+`npm run web` serves the landing page (`site/index.html`) and a **live demo** at `/demo`. The demo runs the whole stack inside the server process: a local Anvil chain, the contracts, the sponsor, the facilitator and the paid API, all on loopback-only ports. A visitor presses **Run live demo** and watches a fresh wallet do the following, streamed step by step:
 
-1. In Railway, choose **New Project → Deploy from GitHub repo** and pick this repository.
-2. Railway reads `railway.json`, builds `site/Dockerfile` and injects `PORT`. No variables are needed.
-3. Under **Settings → Networking**, choose **Generate Domain** (or add your own).
+1. Make a gasless deposit.
+2. Pay three x402 APIs with real Groth16 proofs.
+3. Show what the merchant saw and what the viewing-key auditor sees.
+4. Show a screened address being rejected.
 
-To preview it locally: `node site/server.js` serves the page at http://localhost:8080.
+Runs are queued one at a time and limited per IP (`DEMO_RUNS_PER_HOUR`, default 10). The container uses about 450 MB of memory.
+
+To deploy on Railway:
+
+1. Choose **New Project → Deploy from GitHub repo** and pick this repository.
+2. Railway reads `railway.json`, builds `Dockerfile.railway` and injects `PORT`. No variables are required.
+3. Under **Settings → Networking**, choose **Generate Domain**. The site is at `/` and the demo at `/demo`.
+
+To run it locally: `npm run web` serves it at http://localhost:8080 (the demo is ready a few seconds after start).
 
 ## Layout
 
@@ -113,6 +122,7 @@ To preview it locally: `node site/server.js` serves the page at http://localhost
 | `src/core` | Poseidon, Merkle tree, key engine, ERC-5564 stealth, encrypted memos, prover, x402 types |
 | `src/wallet` | Wallet, x402 auto-pay fetch, spend policy, viewing-key auditor, keystore |
 | `src/services` | Sponsor, facilitator, merchant paywall, wallet daemon |
+| `src/demo`, `src/bin/web.ts`, `site/` | Public website and live demo (Railway) |
 | `zk/` | Circuit wasm and Groth16 keys (**development setup**, see below) |
 
 More detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/SECURITY.md](docs/SECURITY.md)

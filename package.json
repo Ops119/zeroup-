@@ -19,9 +19,11 @@
     "dev": "tsx src/bin/dev.ts",
     "demo": "tsx src/bin/demo.ts",
     "serve": "tsx src/bin/serve.ts",
-    "zeroup": "tsx src/bin/cli.ts"
+    "zeroup": "tsx src/bin/cli.ts",
+    "web": "tsx src/bin/web.ts"
   },
   "dependencies": {
+    "@foundry-rs/anvil": "1.7.1",
     "@noble/ciphers": "1.3.0",
     "@noble/curves": "1.9.7",
     "@noble/hashes": "1.8.0",

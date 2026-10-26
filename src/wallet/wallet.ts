@@ -104,7 +104,7 @@ async function postJson<T>(url: string, body: unknown): Promise<T> {
  * One process per wallet: two processes allocating note indices at once could
  * create two notes with the same nullifier, making one of them unspendable.
  */
-function acquireLock(lockFile: string): void {
+function acquireLock(lockFile: string): () => void {
   const pid = String(process.pid);
   fs.mkdirSync(path.dirname(lockFile), { recursive: true });
   for (;;) {
@@ -114,20 +114,23 @@ function acquireLock(lockFile: string): void {
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       const holder = Number(fs.readFileSync(lockFile, "utf8"));
-      if (holder === process.pid) return;
+      if (holder === process.pid) return () => {};
       if (holder && isAlive(holder)) {
         throw new Error(`wallet is in use by process ${holder}; stop it or use its API instead`);
       }
       fs.rmSync(lockFile, { force: true }); // stale lock from a dead process
     }
   }
-  process.once("exit", () => {
+  const release = () => {
+    process.removeListener("exit", release);
     try {
       if (fs.readFileSync(lockFile, "utf8") === pid) fs.rmSync(lockFile, { force: true });
     } catch {
       /* already gone */
     }
-  });
+  };
+  process.once("exit", release);
+  return release;
 }
 
 function isAlive(pid: number): boolean {
@@ -157,6 +160,7 @@ export class ZeroupWallet {
   private tree!: MerkleTree;
   private sponsorInfoCache?: { info: SponsorInfo; at: number };
   readonly policy: SpendPolicy;
+  private releaseLock: () => void = () => {};
 
   private constructor(private readonly opts: ZeroupWalletOptions) {
     this.store = new StateStore(opts.stateFile, opts.keys.viewingKey);
@@ -165,8 +169,9 @@ export class ZeroupWallet {
 
   static async open(opts: ZeroupWalletOptions): Promise<ZeroupWallet> {
     await initPoseidon();
-    acquireLock(`${opts.stateFile}.lock`);
+    const release = acquireLock(`${opts.stateFile}.lock`);
     const w = new ZeroupWallet(opts);
+    w.releaseLock = release;
     const d = opts.deployment;
     const loaded = w.store.load();
     // Local state is only a cache: everything in it can be rebuilt from the
@@ -174,7 +179,7 @@ export class ZeroupWallet {
     const anchor = await opts.publicClient
       .getBlock({ blockNumber: BigInt(d.deployBlock) })
       .then((b) => b.hash, () => undefined);
-    const latest = await opts.publicClient.getBlockNumber();
+    const latest = await opts.publicClient.getBlockNumber({ cacheTime: 0 });
     w.state =
       loaded &&
       loaded.chainId === d.chainId &&
@@ -186,6 +191,11 @@ export class ZeroupWallet {
     w.tree = new MerkleTree(TREE_LEVELS);
     for (const leaf of w.state.leaves) w.tree.insert(BigInt(leaf));
     return w;
+  }
+
+  /** Waits for in-flight work, then releases the wallet lock. */
+  close(): Promise<void> {
+    return this.queue.run(async () => this.releaseLock());
   }
 
   get network(): string {
@@ -568,7 +578,7 @@ export class ZeroupWallet {
   private async syncUnlocked(): Promise<void> {
     const { publicClient: client, deployment: d } = this.opts;
     const chunk = this.opts.logChunkSize ?? 5000n;
-    const latest = await client.getBlockNumber();
+    const latest = await client.getBlockNumber({ cacheTime: 0 });
     let from = BigInt(this.state.lastSyncedBlock) + 1n;
     while (from <= latest) {
       const to = from + chunk - 1n < latest ? from + chunk - 1n : latest;
